@@ -1,0 +1,62 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function member(projectId) {
+      return get(/databases/$(database)/documents/memberships/$(projectId + '_' + request.auth.uid));
+    }
+    function hasRole(projectId, roles) {
+      return signedIn() && member(projectId).data.role in roles;
+    }
+    function isOwner(projectId) { return hasRole(projectId, ['owner']); }
+    function createdProjectOwner(projectId) {
+      return signedIn() && get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid;
+    }
+
+    match /profiles/{userId} {
+      allow create: if signedIn() && request.auth.uid == userId;
+      allow read, update: if signedIn() && request.auth.uid == userId;
+      allow delete: if false;
+    }
+    match /projects/{projectId} {
+      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow read: if hasRole(projectId, ['owner','editor','commenter','viewer']);
+      allow update, delete: if isOwner(projectId);
+
+      match /networks/{networkId} {
+        allow read: if hasRole(projectId, ['owner','editor','commenter','viewer']);
+        allow create, update, delete: if hasRole(projectId, ['owner','editor']);
+      }
+      match /rubrics/{rubricId} {
+        allow read: if hasRole(projectId, ['owner','editor','commenter','viewer']);
+        allow create, update, delete: if hasRole(projectId, ['owner','editor']);
+      }
+      match /posts/{postId} {
+        allow read: if hasRole(projectId, ['owner','editor','commenter','viewer']);
+        allow create, update, delete: if hasRole(projectId, ['owner','editor']);
+      }
+      match /comments/{commentId} {
+        allow read: if hasRole(projectId, ['owner','editor','commenter','viewer']);
+        allow create: if hasRole(projectId, ['owner','editor','commenter']) && request.resource.data.authorId == request.auth.uid;
+        allow update, delete: if isOwner(projectId) || (hasRole(projectId, ['commenter']) && resource.data.authorId == request.auth.uid);
+      }
+    }
+    match /invitations/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create, update, delete: if signedIn() && isOwner(request.resource.data.projectId);
+    }
+    match /memberships/{membershipId} {
+      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isOwner(resource.data.projectId));
+      allow create: if signedIn() && (
+        (request.resource.data.userId == request.auth.uid &&
+         get(/databases/$(database)/documents/invitations/$(request.resource.data.inviteCode)).data.active == true &&
+         get(/databases/$(database)/documents/invitations/$(request.resource.data.inviteCode)).data.projectId == request.resource.data.projectId &&
+         get(/databases/$(database)/documents/invitations/$(request.resource.data.inviteCode)).data.role == request.resource.data.role)
+        || isOwner(request.resource.data.projectId)
+        || (request.resource.data.userId == request.auth.uid && createdProjectOwner(request.resource.data.projectId))
+      );
+      allow update, delete: if signedIn() && isOwner(resource.data.projectId);
+    }
+  }
+}
