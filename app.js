@@ -17,6 +17,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  writeBatch,
   query,
   where,
   serverTimestamp,
@@ -26,7 +27,6 @@ const firebaseConfig = {
   apiKey: "AIzaSyD3X0A-r34omGmCmm2v1eXIm_bATY6G_Yw",
   authDomain: "content-planner-aef9e.firebaseapp.com",
   projectId: "content-planner-aef9e",
-  storageBucket: "content-planner-aef9e.firebasestorage.app",
   messagingSenderId: "879380511083",
   appId: "1:879380511083:web:a1e8f9a5f0d5cdb372b42e",
 };
@@ -44,6 +44,13 @@ const ROLE_LABELS = {
   viewer: "Читатель",
 };
 const POST_STATUSES = ["Идея", "В работе", "На согласовании", "Готово", "Опубликовано"];
+const STATUS_CLASSES = {
+  "Идея": "idea",
+  "В работе": "in-progress",
+  "На согласовании": "review",
+  "Готово": "ready",
+  "Опубликовано": "published",
+};
 
 let user = null;
 let projects = [];
@@ -72,12 +79,23 @@ const initials = () => {
 const roleLabel = (role) => ROLE_LABELS[role] || role;
 const canEdit = (role) => ["owner", "editor"].includes(role);
 const canComment = (role) => ["owner", "editor", "commenter"].includes(role);
+const statusClass = (status) => STATUS_CLASSES[status] || STATUS_CLASSES.Идея;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
 function addDays(iso, amount) {
   const date = new Date(`${iso}T12:00:00`);
   date.setDate(date.getDate() + amount);
   return date.toISOString().slice(0, 10);
+}
+
+function monthDates(iso, offset = 0) {
+  const source = new Date(`${iso}T12:00:00`);
+  const firstDay = new Date(source.getFullYear(), source.getMonth() + offset, 1, 12);
+  const daysInMonth = new Date(firstDay.getFullYear(), firstDay.getMonth() + 1, 0).getDate();
+  return Array.from({ length: daysInMonth }, (_, index) => {
+    const date = new Date(firstDay.getFullYear(), firstDay.getMonth(), index + 1, 12);
+    return date.toISOString().slice(0, 10);
+  });
 }
 
 function formatDate(iso) {
@@ -104,13 +122,13 @@ function loader(label = "Загружаю…") {
   app.innerHTML = `<div class="loader">${esc(label)}</div>`;
 }
 
-function accountMarkup() {
+function accountMarkup({ showHome = true } = {}) {
   return `
     <div class="account-wrap">
       <button class="account-button" data-account aria-label="Открыть меню аккаунта">${esc(initials())}</button>
       <div class="account-menu hidden" data-account-menu>
         <div class="account-name"><strong>${esc(user?.displayName || "Аккаунт")}</strong><br><small>${esc(user?.email || "")}</small></div>
-        <button data-go-home>Выйти на главный экран</button>
+        ${showHome ? "<button data-go-home>Выйти на главный экран</button>" : ""}
         <button data-signout>Выйти из аккаунта</button>
       </div>
     </div>`;
@@ -132,7 +150,8 @@ function bindAccountMenu() {
     }
   };
   menu.addEventListener("click", (event) => event.stopPropagation());
-  menu.querySelector("[data-go-home]").onclick = () => {
+  const homeButton = menu.querySelector("[data-go-home]");
+  if (homeButton) homeButton.onclick = () => {
     const url = new URL(window.location.href);
     url.search = "";
     window.location.href = url.toString();
@@ -176,7 +195,7 @@ function openModal(title, content, size = "") {
 
 function renderAuth(mode = "welcome") {
   const welcome = `
-    <p class="subtitle">Создавайте контент-планы по соцсетям, распределяйте публикации по рубрикам и работайте вместе с командой.</p>
+    <p class="subtitle">Создавайте контент-планы для проектов и работайте в команде</p>
     <div class="auth-actions">
       <button class="button primary" data-auth-mode="login">Войти</button>
       <button class="button" data-auth-mode="register">Зарегистрироваться</button>
@@ -194,7 +213,7 @@ function renderAuth(mode = "welcome") {
     </form>
     <div data-message></div>`;
 
-  app.innerHTML = `<section class="screen auth-screen"><div class="card auth-card"><h1>Контент-<br>план</h1>${mode === "welcome" ? welcome : form}</div></section>`;
+  app.innerHTML = `<section class="screen auth-screen"><div class="card auth-card"><h1>Контент-план</h1>${mode === "welcome" ? welcome : form}</div></section>`;
   document.querySelectorAll("[data-auth-mode]").forEach((button) => {
     button.onclick = () => renderAuth(button.dataset.authMode);
   });
@@ -264,10 +283,14 @@ async function renderDashboard() {
           <div class="sidebar-footer"><button class="link-button" data-join-project>Ввести код проекта</button></div>
         </aside>
         <main class="dashboard-main">
-          <div class="page-topbar"><span></span>${accountMarkup()}</div>
+          <div class="page-topbar"><span></span>${accountMarkup({ showHome: false })}</div>
           <div class="welcome-copy">
             <h1>Здравствуйте, ${esc(user.displayName || "друг")}!</h1>
             <p class="subtitle">С чего начнём?</p>
+            <div class="dashboard-actions">
+              <button class="button primary" data-dashboard-create>Создать проект</button>
+              <button class="button ghost" data-dashboard-join>Ввести код проекта</button>
+            </div>
           </div>
         </main>
       </div>
@@ -276,6 +299,8 @@ async function renderDashboard() {
   bindAccountMenu();
   document.querySelector("[data-create-project]").onclick = renderCreateProject;
   document.querySelector("[data-join-project]").onclick = openJoinModal;
+  document.querySelector("[data-dashboard-create]").onclick = renderCreateProject;
+  document.querySelector("[data-dashboard-join]").onclick = openJoinModal;
   document.querySelectorAll("[data-open-project]").forEach((button) => {
     button.onclick = () => renderNetworkSelection(projectById(button.dataset.openProject));
   });
@@ -537,22 +562,72 @@ function syncRowsFromDom(rows) {
 async function renderNetworkSettings(project) {
   loader();
   const networks = await getNetworks(project.id);
+  const existingRubrics = await getRubrics(project.id);
+  const rubricRows = existingRubrics.length
+    ? existingRubrics.map((rubric) => ({ id: rubric.id, name: rubric.name, networkIds: [...(rubric.networkIds || [])] }))
+    : [{ id: "", name: "", networkIds: [] }];
+  const removedRubrics = new Set();
+
+  const drawProjectRubrics = () => {
+    const list = document.querySelector("[data-project-rubric-list]");
+    list.innerHTML = rubricRows.map((row, index) => `
+      <div class="rubric-editor-row" data-project-rubric-row="${index}">
+        <input data-rubric-name value="${esc(row.name)}" maxlength="70" placeholder="Название рубрики">
+        <div class="checkbox-list">
+          ${networks.map((network) => `<label class="check-pill"><input type="checkbox" value="${network.id}" ${row.networkIds.includes(network.id) ? "checked" : ""}>${esc(network.name)}</label>`).join("")}
+        </div>
+        <button type="button" class="icon-button" data-remove-project-rubric="${index}" aria-label="Удалить рубрику">×</button>
+      </div>`).join("");
+    list.querySelectorAll("[data-remove-project-rubric]").forEach((button) => {
+      button.onclick = () => {
+        syncProjectRubrics();
+        const index = Number(button.dataset.removeProjectRubric);
+        if (rubricRows[index].id) removedRubrics.add(rubricRows[index].id);
+        rubricRows.splice(index, 1);
+        if (!rubricRows.length) rubricRows.push({ id: "", name: "", networkIds: [] });
+        drawProjectRubrics();
+      };
+    });
+  };
+
+  const syncProjectRubrics = () => {
+    document.querySelectorAll("[data-project-rubric-row]").forEach((element) => {
+      const index = Number(element.dataset.projectRubricRow);
+      rubricRows[index].name = element.querySelector("[data-rubric-name]").value;
+      rubricRows[index].networkIds = [...element.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+    });
+  };
+
   app.innerHTML = `
     <section class="screen flow-screen">
       ${pageTopbar("К проекту")}
-      <div class="flow-card card narrow">
-        <h1>Соцсети</h1>
-        <p class="subtitle">Добавляйте площадки проекта или удаляйте те, которые больше не используются.</p>
-        <div class="tag-list" data-network-tags>
-          ${networks.map((network) => `<span class="tag">${esc(network.name)} <button class="icon-button" data-delete-network="${network.id}">×</button></span>`).join("") || '<span class="muted">Нет соцсетей</span>'}
-        </div>
-        <form class="form" id="network-settings-form">
-          <label>Новая соцсеть<input name="name" required maxlength="40" placeholder="Название площадки"></label>
-          <button class="button">Добавить</button>
-        </form>
+      <div class="flow-card card project-setup-card">
+        <h1>Настройка проекта</h1>
+        <section class="settings-section">
+          <h2>Соцсети</h2>
+          <p class="subtitle">Добавляйте площадки проекта или удаляйте те, которые больше не используются.</p>
+          <div class="tag-list" data-network-tags>
+            ${networks.map((network) => `<span class="tag">${esc(network.name)} <button class="icon-button" data-delete-network="${network.id}" aria-label="Удалить соцсеть ${esc(network.name)}">×</button></span>`).join("") || '<span class="muted">Нет соцсетей</span>'}
+          </div>
+          <form class="form settings-inline-form" id="network-settings-form">
+            <label>Новая соцсеть<input name="name" required maxlength="40" placeholder="Название площадки"></label>
+            <button class="button">Добавить</button>
+          </form>
+        </section>
+        <section class="settings-section">
+          <h2>Рубрики</h2>
+          <p class="subtitle">Создайте рубрики и отметьте соцсети, в которых используется каждая из них.</p>
+          <form class="form" id="project-rubrics-form">
+            <div class="rubric-editor-list" data-project-rubric-list></div>
+            <button type="button" class="button ghost" data-add-project-rubric>+ Добавить рубрику</button>
+            <button class="button primary">Сохранить рубрики</button>
+            <div data-message></div>
+          </form>
+        </section>
       </div>
     </section>`;
   bindTopbar(() => renderNetworkSelection(project));
+  drawProjectRubrics();
   document.querySelector("#network-settings-form").onsubmit = async (event) => {
     event.preventDefault();
     const name = new FormData(event.currentTarget).get("name").trim();
@@ -566,6 +641,29 @@ async function renderNetworkSettings(project) {
       renderNetworkSettings(project);
     };
   });
+  document.querySelector("[data-add-project-rubric]").onclick = () => {
+    syncProjectRubrics();
+    rubricRows.push({ id: "", name: "", networkIds: [] });
+    drawProjectRubrics();
+  };
+  document.querySelector("#project-rubrics-form").onsubmit = async (event) => {
+    event.preventDefault();
+    syncProjectRubrics();
+    try {
+      const validRows = rubricRows.filter((row) => row.name.trim());
+      if (!validRows.length) throw new Error("Добавьте хотя бы одну рубрику.");
+      if (validRows.some((row) => !row.networkIds.length)) throw new Error("Для каждой рубрики выберите хотя бы одну соцсеть.");
+      for (const id of removedRubrics) await deleteDoc(doc(db, "projects", project.id, "rubrics", id));
+      for (const row of validRows) {
+        const payload = { name: row.name.trim(), networkIds: row.networkIds, updatedAt: serverTimestamp() };
+        if (row.id) await updateDoc(doc(db, "projects", project.id, "rubrics", row.id), payload);
+        else await addDoc(collection(db, "projects", project.id, "rubrics"), { ...payload, createdAt: serverTimestamp() });
+      }
+      showMessage("Рубрики сохранены.", "success", event.currentTarget);
+    } catch (error) {
+      showMessage(readError(error), "error", event.currentTarget);
+    }
+  };
 }
 
 async function renderNetworkSelection(project) {
@@ -607,11 +705,12 @@ async function renderProjectSettings(project) {
         <form class="form" id="project-settings-form">
           <label>Название<input name="name" required maxlength="80" value="${esc(project.name)}"></label>
           <label>О проекте<textarea name="description" maxlength="600">${esc(project.description || "")}</textarea></label>
+          <button type="button" class="button ghost" data-manage-networks>Настроить проект</button>
           <button class="button primary">Сохранить изменения</button>
           <div data-message></div>
         </form>
-        <div class="flow-actions">
-          <button class="button ghost" data-manage-networks>Настроить соцсети</button>
+        <div class="flow-actions project-danger-actions">
+          <span></span>
           <button class="button danger" data-delete-project>Удалить проект</button>
         </div>
       </div>
@@ -629,16 +728,26 @@ async function renderProjectSettings(project) {
     await loadProjects();
     showMessage("Изменения сохранены.", "success");
   };
-  document.querySelector("[data-delete-project]").onclick = async () => {
+  document.querySelector("[data-delete-project]").onclick = async (event) => {
     if (!confirm(`Удалить проект «${project.name}» вместе со всеми публикациями? Это действие нельзя отменить.`)) return;
-    await deleteProject(project);
-    await loadProjects();
-    renderDashboard();
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = "Удаляю…";
+    try {
+      await deleteProject(project);
+      projects = [];
+      await loadProjects();
+      renderDashboard();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = "Удалить проект";
+      showMessage(`Не удалось удалить проект: ${readError(error)}`);
+    }
   };
 }
 
 async function deleteProject(project) {
-  for (const subcollection of ["networks", "rubrics", "posts", "comments"]) {
+  for (const subcollection of ["networks", "rubrics", "posts", "postImages", "comments"]) {
     const snapshot = await getDocs(collection(db, "projects", project.id, subcollection));
     for (const item of snapshot.docs) await deleteDoc(item.ref);
   }
@@ -647,7 +756,11 @@ async function deleteProject(project) {
   for (const member of members.docs) {
     if (member !== ownerMembership) await deleteDoc(member.ref);
   }
-  if (project.shareCode) await deleteDoc(doc(db, "invitations", project.shareCode));
+  if (project.shareCode) {
+    const invitationRef = doc(db, "invitations", project.shareCode);
+    const invitationSnapshot = await getDoc(invitationRef);
+    if (invitationSnapshot.exists()) await deleteDoc(invitationRef);
+  }
   await deleteDoc(doc(db, "projects", project.id));
   if (ownerMembership) await deleteDoc(ownerMembership.ref);
 }
@@ -745,9 +858,10 @@ async function renderPlan(projectId, networkId) {
 
 function drawPlan(project, network, rubrics, posts) {
   const baseStart = project.planStartDate || todayIso();
-  const start = addDays(baseStart, planOffset);
-  const dates = Array.from({ length: 10 }, (_, index) => addDays(start, index));
-  const columns = Array.from({ length: Math.max(10, rubrics.length) }, (_, index) => rubrics[index] || null);
+  const dates = monthDates(baseStart, planOffset);
+  const columns = rubrics;
+  const monthLabel = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(new Date(`${dates[0]}T12:00:00`));
+  const gridMinWidth = Math.max(280, 100 + columns.length * 180);
   const postMap = new Map(posts.map((post) => [`${post.date}|${post.rubricId}`, post]));
 
   app.innerHTML = `
@@ -757,24 +871,24 @@ function drawPlan(project, network, rubrics, posts) {
         <div><h1>${esc(project.name)} — ${esc(network.name)}</h1><p class="subtitle">Нажмите на ячейку, чтобы создать или открыть публикацию.</p></div>
         <div class="plan-tools">
           ${canEdit(project.role) ? '<button class="button" data-edit-rubrics>Редактировать рубрики</button>' : ""}
-          <button class="button ghost small" data-prev-dates>−10 дней</button>
-          <button class="button ghost small" data-next-dates>+10 дней</button>
+          <button class="button ghost small" data-prev-dates>← Месяц</button>
+          <span class="month-label">${esc(monthLabel)}</span>
+          <button class="button ghost small" data-next-dates>Месяц →</button>
           <button class="button ghost small" data-zoom-out>−</button>
           <span class="zoom-value">${Math.round(planZoom * 100)}%</span>
           <button class="button ghost small" data-zoom-in>+</button>
         </div>
       </div>
       <div class="grid-scroll">
-        <table class="content-grid" style="--cell-height:${Math.round(50 * planZoom)}px;--header-height:${Math.round(44 * planZoom)}px;--grid-font:${(0.92 * planZoom).toFixed(2)}rem;width:${Math.round(planZoom * 100)}%;min-width:${Math.round(1050 * planZoom)}px">
+        <table class="content-grid" style="--cell-height:${Math.round(50 * planZoom)}px;--header-height:${Math.round(44 * planZoom)}px;--grid-font:${(0.92 * planZoom).toFixed(2)}rem;width:${Math.round(planZoom * 100)}%;min-width:${Math.round(gridMinWidth * planZoom)}px">
           <thead><tr><th class="date-column">Дата</th>${columns.map((rubric) => `<th>${rubric ? esc(rubric.name) : ""}</th>`).join("")}</tr></thead>
           <tbody>
             ${dates.map((date) => `<tr>
               <td class="date-column">${formatDate(date)}</td>
               ${columns.map((rubric) => {
-                if (!rubric) return '<td class="post-cell"></td>';
                 const post = postMap.get(`${date}|${rubric.id}`);
                 const clickable = post || canEdit(project.role);
-                return `<td class="post-cell real" ${clickable ? `data-post-cell data-date="${date}" data-rubric="${rubric.id}" data-post="${post?.id || ""}"` : ""}>
+                return `<td class="post-cell real ${post ? `post-status-${statusClass(post.status)}` : ""}" ${clickable ? `data-post-cell data-date="${date}" data-rubric="${rubric.id}" data-post="${post?.id || ""}"` : ""}>
                   ${post ? `<span class="post-title">${esc(post.title)}</span><i class="post-status-dot" title="${esc(post.status || "Идея")}"></i>` : ""}
                 </td>`;
               }).join("")}
@@ -789,8 +903,8 @@ function drawPlan(project, network, rubrics, posts) {
   document.querySelector("[data-edit-rubrics]")?.addEventListener("click", () => {
     renderRubricSetup(project, { returnToPlan: { projectId: project.id, networkId: network.id } });
   });
-  document.querySelector("[data-prev-dates]").onclick = () => { planOffset -= 10; renderPlan(project.id, network.id); };
-  document.querySelector("[data-next-dates]").onclick = () => { planOffset += 10; renderPlan(project.id, network.id); };
+  document.querySelector("[data-prev-dates]").onclick = () => { planOffset -= 1; renderPlan(project.id, network.id); };
+  document.querySelector("[data-next-dates]").onclick = () => { planOffset += 1; renderPlan(project.id, network.id); };
   document.querySelector("[data-zoom-out]").onclick = () => { planZoom = Math.max(0.8, planZoom - 0.1); drawPlan(project, network, rubrics, posts); };
   document.querySelector("[data-zoom-in]").onclick = () => { planZoom = Math.min(1.4, planZoom + 0.1); drawPlan(project, network, rubrics, posts); };
   document.querySelectorAll("[data-post-cell]").forEach((cell) => {
@@ -806,20 +920,49 @@ async function openPostEditor({ project, network, rubric, date, post }) {
   const editable = canEdit(project.role);
   const commentable = canComment(project.role);
   let comments = [];
+  let postImages = [];
   if (post) {
-    const snapshot = await getDocs(query(collection(db, "projects", project.id, "comments"), where("postId", "==", post.id)));
-    comments = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    const [commentSnapshot, imageSnapshot] = await Promise.all([
+      getDocs(query(collection(db, "projects", project.id, "comments"), where("postId", "==", post.id))),
+      getDocs(query(collection(db, "projects", project.id, "postImages"), where("postId", "==", post.id))),
+    ]);
+    comments = commentSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    postImages = imageSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
   }
   const disabled = editable ? "" : "disabled";
+  const referenceImages = [
+    ...postImages.filter((image) => image.kind === "reference").map((image) => ({ id: image.id, url: image.dataUrl })),
+    ...normalizeImageList(post?.referenceImages, post?.reference).map((url) => ({ id: "", url })),
+  ];
+  const visualImages = [
+    ...postImages.filter((image) => image.kind === "visual").map((image) => ({ id: image.id, url: image.dataUrl })),
+    ...normalizeImageList(post?.visualImages, post?.visual).map((url) => ({ id: "", url })),
+  ];
+  let currentImageCount = referenceImages.length + visualImages.length;
   const field = (label, name, value = "", tag = "textarea", extra = "") => `
     <label>${label}${tag === "input"
       ? `<input name="${name}" value="${esc(value)}" ${extra} ${disabled}>`
       : `<textarea name="${name}" ${disabled}>${esc(value)}</textarea>`}
     </label>`;
+  const imageField = (label, name, images) => `
+    <div class="image-field">
+      <label>${label}<input type="file" name="${name}" accept="image/*" multiple ${disabled}></label>
+      <div class="image-preview">
+        ${images.map((image) => `<span class="image-preview-item">
+          <a href="${esc(image.url)}" target="_blank" rel="noreferrer"><img src="${esc(image.url)}" alt="${esc(label)}"></a>
+          ${editable && image.id ? `<button type="button" class="image-remove" data-delete-image="${image.id}" aria-label="Удалить изображение">×</button>` : ""}
+        </span>`).join("") || '<span class="muted">Изображения не добавлены</span>'}
+      </div>
+    </div>`;
+
+  const editorPostRef = post
+    ? doc(db, "projects", project.id, "posts", post.id)
+    : doc(collection(db, "projects", project.id, "posts"));
 
   const modal = openModal(
     post ? "Публикация" : "Новая публикация",
     `<form class="form" id="post-form">
+      ${editable ? '<div class="post-form-toolbar"><span>Сохраните изменения перед закрытием</span><button class="button primary">Сохранить</button></div>' : ""}
       <div class="form-row">
         <label>Дата<input value="${formatDate(date)}" disabled></label>
         <label>Рубрика<input value="${esc(rubric.name)}" disabled></label>
@@ -831,16 +974,16 @@ async function openPostEditor({ project, network, rubric, date, post }) {
           ${field("Суть поста", "idea", post?.idea)}
           ${field("Польза для пользователя", "benefit", post?.benefit)}
           ${field("Формат", "format", post?.format)}
-          ${field("Референсы и скрины", "reference", post?.reference)}
+          ${imageField("Референсы и скрины", "referenceFiles", referenceImages)}
         </section>
         <section class="editor-column">
           <h3>Готовый материал</h3>
           ${field("Подводка / готовый текст", "caption", post?.caption)}
-          ${field("Визуал", "visual", post?.visual)}
+          ${imageField("Визуал", "visualFiles", visualImages)}
           <label>Статус<select name="status" ${disabled}>${POST_STATUSES.map((status) => `<option ${post?.status === status ? "selected" : ""}>${status}</option>`).join("")}</select></label>
         </section>
       </div>
-      ${editable ? `<div class="flow-actions">${post ? '<button type="button" class="button danger" data-delete-post>Удалить</button>' : "<span></span>"}<button class="button primary">Сохранить</button></div>` : ""}
+      ${editable && post ? '<div class="flow-actions"><button type="button" class="button danger" data-delete-post>Удалить</button><span></span></div>' : ""}
       <div data-message></div>
     </form>
     <section class="comments">
@@ -853,9 +996,28 @@ async function openPostEditor({ project, network, rubric, date, post }) {
 
   const form = modal.querySelector("#post-form");
   if (editable) {
+    modal.querySelectorAll("[data-delete-image]").forEach((button) => {
+      button.onclick = async () => {
+        button.disabled = true;
+        try {
+          await deleteDoc(doc(db, "projects", project.id, "postImages", button.dataset.deleteImage));
+          postImages = postImages.filter((image) => image.id !== button.dataset.deleteImage);
+          currentImageCount -= 1;
+          button.closest(".image-preview-item").remove();
+        } catch (error) {
+          button.disabled = false;
+          showMessage(readError(error), "error", modal);
+        }
+      };
+    });
     form.onsubmit = async (event) => {
       event.preventDefault();
       const data = new FormData(form);
+      const saveButton = form.querySelector(".post-form-toolbar .primary");
+      saveButton.disabled = true;
+      saveButton.textContent = "Сохраняю…";
+      const referenceFiles = data.getAll("referenceFiles").filter((file) => file instanceof File && file.size);
+      const visualFiles = data.getAll("visualFiles").filter((file) => file instanceof File && file.size);
       const payload = {
         networkId: network.id,
         networkName: network.name,
@@ -866,24 +1028,48 @@ async function openPostEditor({ project, network, rubric, date, post }) {
         idea: data.get("idea").trim(),
         benefit: data.get("benefit").trim(),
         format: data.get("format").trim(),
-        reference: data.get("reference").trim(),
         caption: data.get("caption").trim(),
-        visual: data.get("visual").trim(),
         status: data.get("status"),
         updatedAt: serverTimestamp(),
       };
       try {
-        if (post) await updateDoc(doc(db, "projects", project.id, "posts", post.id), payload);
-        else await addDoc(collection(db, "projects", project.id, "posts"), { ...payload, createdAt: serverTimestamp(), authorId: user.uid });
+        if (currentImageCount + referenceFiles.length + visualFiles.length > 4) {
+          throw new Error("В одной публикации можно сохранить не более четырёх изображений.");
+        }
+        const [newReferences, newVisuals] = await Promise.all([
+          Promise.all(referenceFiles.map(compressImage)),
+          Promise.all(visualFiles.map(compressImage)),
+        ]);
+        const batch = writeBatch(db);
+        if (post) batch.update(editorPostRef, payload);
+        else batch.set(editorPostRef, { ...payload, createdAt: serverTimestamp(), authorId: user.uid });
+        for (const [kind, images] of [["reference", newReferences], ["visual", newVisuals]]) {
+          for (const dataUrl of images) {
+            const imageRef = doc(collection(db, "projects", project.id, "postImages"));
+            batch.set(imageRef, {
+              postId: editorPostRef.id,
+              kind,
+              dataUrl,
+              authorId: user.uid,
+              createdAt: serverTimestamp(),
+            });
+          }
+        }
+        await batch.commit();
         modal.remove();
         renderPlan(project.id, network.id);
       } catch (error) {
+        saveButton.disabled = false;
+        saveButton.textContent = "Сохранить";
         showMessage(readError(error), "error", modal);
       }
     };
     modal.querySelector("[data-delete-post]")?.addEventListener("click", async () => {
       if (!confirm("Удалить эту публикацию?")) return;
-      await deleteDoc(doc(db, "projects", project.id, "posts", post.id));
+      const batch = writeBatch(db);
+      postImages.forEach((image) => batch.delete(doc(db, "projects", project.id, "postImages", image.id)));
+      batch.delete(doc(db, "projects", project.id, "posts", post.id));
+      await batch.commit();
       modal.remove();
       renderPlan(project.id, network.id);
     });
@@ -900,6 +1086,62 @@ async function openPostEditor({ project, network, rubric, date, post }) {
     });
     modal.remove();
     openPostEditor({ project, network, rubric, date, post });
+  });
+}
+
+function normalizeImageList(value, legacyValue = "") {
+  const safeImageUrl = (item) => typeof item === "string" && /^(https:\/\/|data:image\/(?:webp|png|jpeg);base64,)/i.test(item);
+  if (Array.isArray(value)) return value.filter(safeImageUrl);
+  if (typeof legacyValue === "string" && /^https?:\/\//i.test(legacyValue.trim())) return [legacyValue.trim()];
+  return [];
+}
+
+async function compressImage(file) {
+  if (!file.type.startsWith("image/")) throw new Error(`Файл «${file.name}» не является изображением.`);
+  if (file.size > 20 * 1024 * 1024) throw new Error(`Файл «${file.name}» больше 20 МБ.`);
+
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    throw new Error(`Не удалось прочитать «${file.name}». Выберите JPG, PNG или WebP.`);
+  }
+
+  const maxDimension = 1400;
+  const initialScale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+  let width = Math.max(1, Math.round(bitmap.width * initialScale));
+  let height = Math.max(1, Math.round(bitmap.height * initialScale));
+  let quality = 0.8;
+  let blob = null;
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d", { alpha: true });
+
+  for (let attempt = 0; attempt < 18; attempt += 1) {
+    canvas.width = width;
+    canvas.height = height;
+    context.clearRect(0, 0, width, height);
+    context.drawImage(bitmap, 0, 0, width, height);
+    blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/webp", quality));
+    if (!blob) throw new Error(`Не удалось обработать «${file.name}».`);
+    if (blob.size <= 90 * 1024) break;
+    if (quality > 0.35) quality -= 0.1;
+    else if (Math.max(width, height) > 480) {
+      width = Math.max(1, Math.round(width * 0.8));
+      height = Math.max(1, Math.round(height * 0.8));
+      quality = 0.7;
+    } else quality = Math.max(0.15, quality - 0.08);
+  }
+  bitmap.close?.();
+  if (!blob || blob.size > 100 * 1024) throw new Error(`Не удалось достаточно уменьшить «${file.name}».`);
+  return blobToDataUrl(blob);
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("Не удалось подготовить изображение к сохранению."));
+    reader.readAsDataURL(blob);
   });
 }
 

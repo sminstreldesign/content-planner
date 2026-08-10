@@ -35,6 +35,19 @@ service cloud.firestore {
         allow read: if hasRole(projectId, ['owner','editor','commenter','viewer']);
         allow create, update, delete: if hasRole(projectId, ['owner','editor']);
       }
+      match /postImages/{imageId} {
+        allow read: if hasRole(projectId, ['owner','editor','commenter','viewer']);
+        allow create: if hasRole(projectId, ['owner','editor'])
+          && request.resource.data.keys().hasOnly(['postId', 'kind', 'dataUrl', 'authorId', 'createdAt'])
+          && request.resource.data.postId is string
+          && request.resource.data.kind in ['reference', 'visual']
+          && request.resource.data.dataUrl is string
+          && request.resource.data.dataUrl.size() <= 140000
+          && request.resource.data.dataUrl.matches('^data:image/webp;base64,.*')
+          && request.resource.data.authorId == request.auth.uid;
+        allow update: if false;
+        allow delete: if hasRole(projectId, ['owner','editor']);
+      }
       match /comments/{commentId} {
         allow read: if hasRole(projectId, ['owner','editor','commenter','viewer']);
         allow create: if hasRole(projectId, ['owner','editor','commenter']) && request.resource.data.authorId == request.auth.uid;
