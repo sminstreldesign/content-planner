@@ -36,7 +36,6 @@ const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
 const app = document.querySelector("#app");
 
-const DEFAULT_NETWORKS = ["Telegram", "ВКонтакте", "Instagram", "YouTube", "TikTok", "Дзен"];
 const ROLE_LABELS = {
   owner: "Владелец",
   editor: "Редактор",
@@ -175,7 +174,7 @@ function bindTopbar(onBack = null) {
 function openModal(title, content, size = "") {
   app.insertAdjacentHTML(
     "beforeend",
-    `<div class="modal-backdrop" data-modal>
+    `<div class="modal-backdrop" data-modal tabindex="-1">
       <section class="modal card ${size}">
         <button class="close" data-close aria-label="Закрыть">×</button>
         <h2>${esc(title)}</h2>
@@ -183,11 +182,16 @@ function openModal(title, content, size = "") {
       </section>
     </div>`,
   );
-  const modal = document.querySelector("[data-modal]");
+  const modals = document.querySelectorAll("[data-modal]");
+  const modal = modals[modals.length - 1];
   modal.querySelector("[data-close]").onclick = () => modal.remove();
   modal.addEventListener("click", (event) => {
     if (event.target === modal) modal.remove();
   });
+  modal.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") modal.remove();
+  });
+  modal.focus();
   return modal;
 }
 
@@ -287,10 +291,6 @@ async function renderDashboard() {
           <div class="welcome-copy">
             <h1>Здравствуйте, ${esc(user.displayName || "друг")}!</h1>
             <p class="subtitle">С чего начнём?</p>
-            <div class="dashboard-actions">
-              <button class="button primary" data-dashboard-create>Создать проект</button>
-              <button class="button ghost" data-dashboard-join>Ввести код проекта</button>
-            </div>
           </div>
         </main>
       </div>
@@ -299,8 +299,6 @@ async function renderDashboard() {
   bindAccountMenu();
   document.querySelector("[data-create-project]").onclick = renderCreateProject;
   document.querySelector("[data-join-project]").onclick = openJoinModal;
-  document.querySelector("[data-dashboard-create]").onclick = renderCreateProject;
-  document.querySelector("[data-dashboard-join]").onclick = openJoinModal;
   document.querySelectorAll("[data-open-project]").forEach((button) => {
     button.onclick = () => renderNetworkSelection(projectById(button.dataset.openProject));
   });
@@ -363,95 +361,220 @@ function openJoinModal() {
 /* ---------------- Создание проекта ---------------- */
 
 function renderCreateProject() {
-  const selected = new Set();
-  const customNetworks = [];
+  const draft = {
+    name: "",
+    description: "",
+    networks: [],
+    rubrics: [{ name: "", networkKeys: [] }],
+  };
+  let nextNetworkKey = 1;
 
-  const redrawNetworks = () => {
-    const root = document.querySelector("[data-network-options]");
-    const all = [...DEFAULT_NETWORKS, ...customNetworks];
-    root.innerHTML = all.map((name) => `<button type="button" class="network-choice ${selected.has(name) ? "selected" : ""}" data-network-name="${esc(name)}">${esc(name)}</button>`).join("");
-    root.querySelectorAll("[data-network-name]").forEach((button) => {
+  const syncRubrics = () => {
+    document.querySelectorAll("[data-create-rubric-row]").forEach((element) => {
+      const index = Number(element.dataset.createRubricRow);
+      if (!draft.rubrics[index]) return;
+      draft.rubrics[index].name = element.querySelector("[data-rubric-name]").value;
+      draft.rubrics[index].networkKeys = [...element.querySelectorAll('input[type="checkbox"]:checked')]
+        .map((input) => input.value);
+    });
+  };
+
+  const renderDetailsStep = () => {
+    app.innerHTML = `
+      <section class="screen flow-screen">
+        ${pageTopbar("На главный экран")}
+        <div class="flow-card card narrow">
+          <div class="step-indicator">Шаг 1 из 2</div>
+          <h1>Новый проект</h1>
+          <p class="subtitle">Сначала добавьте основную информацию о проекте.</p>
+          <form class="form" id="project-details-form">
+            <label>Название <input name="name" required maxlength="80" value="${esc(draft.name)}" placeholder="Название бренда, клиента или направления"></label>
+            <label>О проекте <textarea name="description" maxlength="600" placeholder="Кратко опишите продукт, аудиторию и задачи контента">${esc(draft.description)}</textarea></label>
+            <div class="flow-actions"><span></span><button class="button primary">Далее</button></div>
+          </form>
+        </div>
+      </section>`;
+    bindTopbar(renderDashboard);
+    document.querySelector("#project-details-form").onsubmit = (event) => {
+      event.preventDefault();
+      const data = new FormData(event.currentTarget);
+      draft.name = data.get("name").trim();
+      draft.description = data.get("description").trim();
+      if (!draft.name) {
+        event.currentTarget.elements.name.setCustomValidity("Введите название проекта.");
+        event.currentTarget.reportValidity();
+        event.currentTarget.elements.name.setCustomValidity("");
+        return;
+      }
+      renderSetupStep();
+    };
+  };
+
+  const drawSetup = () => {
+    const networkList = document.querySelector("[data-create-network-list]");
+    networkList.innerHTML = draft.networks.length
+      ? draft.networks.map((network) => `
+          <span class="tag">${esc(network.name)}
+            <button type="button" class="icon-button" data-remove-create-network="${network.key}" aria-label="Удалить соцсеть ${esc(network.name)}">×</button>
+          </span>`).join("")
+      : '<span class="muted">Добавьте хотя бы одну соцсеть.</span>';
+
+    const rubricList = document.querySelector("[data-create-rubric-list]");
+    rubricList.innerHTML = draft.rubrics.map((rubric, index) => `
+      <div class="rubric-editor-row" data-create-rubric-row="${index}">
+        <input data-rubric-name value="${esc(rubric.name)}" maxlength="70" placeholder="Название рубрики">
+        <div class="checkbox-list">
+          ${draft.networks.length ? draft.networks.map((network) => `
+            <label class="check-pill"><input type="checkbox" value="${network.key}" ${rubric.networkKeys.includes(network.key) ? "checked" : ""}>${esc(network.name)}</label>`).join("") : '<span class="muted">Сначала добавьте соцсеть.</span>'}
+        </div>
+        <button type="button" class="icon-button" data-remove-create-rubric="${index}" aria-label="Удалить рубрику">×</button>
+      </div>`).join("");
+
+    networkList.querySelectorAll("[data-remove-create-network]").forEach((button) => {
       button.onclick = () => {
-        const name = button.dataset.networkName;
-        if (selected.has(name)) selected.delete(name); else selected.add(name);
-        redrawNetworks();
+        syncRubrics();
+        const key = button.dataset.removeCreateNetwork;
+        draft.networks = draft.networks.filter((network) => network.key !== key);
+        draft.rubrics.forEach((rubric) => {
+          rubric.networkKeys = rubric.networkKeys.filter((networkKey) => networkKey !== key);
+        });
+        drawSetup();
+      };
+    });
+    rubricList.querySelectorAll("[data-remove-create-rubric]").forEach((button) => {
+      button.onclick = () => {
+        syncRubrics();
+        draft.rubrics.splice(Number(button.dataset.removeCreateRubric), 1);
+        if (!draft.rubrics.length) draft.rubrics.push({ name: "", networkKeys: [] });
+        drawSetup();
       };
     });
   };
 
-  app.innerHTML = `
-    <section class="screen flow-screen">
-      ${pageTopbar("На главный экран")}
-      <div class="flow-card card">
-        <h1>Новый проект</h1>
-        <p class="subtitle">Добавьте основную информацию и площадки, для которых планируете контент.</p>
-        <form class="form" id="create-project-form">
-          <label>Название <input name="name" required maxlength="80" placeholder="Название бренда, клиента или направления"></label>
-          <label>О проекте <textarea name="description" maxlength="600" placeholder="Кратко опишите продукт, аудиторию и задачи контента"></textarea></label>
-          <fieldset>
-            <legend>Соцсети</legend>
-            <div class="network-options" data-network-options></div>
-            <div class="custom-network">
-              <input data-custom-network maxlength="40" placeholder="Другая площадка">
-              <button type="button" class="button ghost" data-add-network>Добавить в список</button>
-            </div>
-          </fieldset>
-          <div data-message></div>
-          <div class="flow-actions"><span></span><button class="button primary">Сохранить и перейти к рубрикам</button></div>
-        </form>
-      </div>
-    </section>`;
+  const renderSetupStep = () => {
+    app.innerHTML = `
+      <section class="screen flow-screen">
+        ${pageTopbar("Назад")}
+        <div class="flow-card card project-setup-card">
+          <div class="step-indicator">Шаг 2 из 2</div>
+          <h1>Настройка проекта</h1>
+          <section class="settings-section">
+            <h2>Соцсети</h2>
+            <p class="subtitle">Добавьте площадки, для которых будете составлять контент-план.</p>
+            <div class="tag-list" data-create-network-list></div>
+            <form class="custom-network" id="create-network-form">
+              <input name="name" required maxlength="40" placeholder="Например, Telegram">
+              <button class="button ghost">Добавить соцсеть</button>
+            </form>
+          </section>
+          <section class="settings-section">
+            <h2>Рубрики</h2>
+            <p class="subtitle">Создайте рубрики и отметьте соцсети, в которых используется каждая из них.</p>
+            <form class="form" id="create-project-form">
+              <div class="rubric-editor-list" data-create-rubric-list></div>
+              <button type="button" class="button ghost" data-add-create-rubric>+ Добавить рубрику</button>
+              <div data-message></div>
+              <div class="flow-actions"><span></span><button class="button primary" data-finish-create>Создать проект</button></div>
+            </form>
+          </section>
+        </div>
+      </section>`;
+    bindTopbar(() => {
+      syncRubrics();
+      renderDetailsStep();
+    });
+    drawSetup();
 
-  bindTopbar(renderDashboard);
-  redrawNetworks();
-  document.querySelector("[data-add-network]").onclick = () => {
-    const input = document.querySelector("[data-custom-network]");
-    const name = input.value.trim();
-    if (!name) return;
-    if (![...DEFAULT_NETWORKS, ...customNetworks].includes(name)) customNetworks.push(name);
-    selected.add(name);
-    input.value = "";
-    redrawNetworks();
-  };
-
-  document.querySelector("#create-project-form").onsubmit = async (event) => {
-    event.preventDefault();
-    const form = event.currentTarget;
-    const data = new FormData(form);
-    try {
-      if (!selected.size) throw new Error("Выберите хотя бы одну соцсеть.");
-      const shareCode = await uniqueCode();
-      const projectDoc = await addDoc(collection(db, "projects"), {
-        ownerId: user.uid,
-        name: data.get("name").trim(),
-        description: data.get("description").trim(),
-        shareCode,
-        planStartDate: todayIso(),
-        createdAt: serverTimestamp(),
-      });
-      await setDoc(doc(db, "memberships", `${projectDoc.id}_${user.uid}`), {
-        projectId: projectDoc.id,
-        userId: user.uid,
-        role: "owner",
-        userName: user.displayName || "Владелец",
-        userEmail: user.email || "",
-        joinedAt: serverTimestamp(),
-      });
-      await setDoc(doc(db, "invitations", shareCode), {
-        projectId: projectDoc.id,
-        role: "viewer",
-        active: true,
-        createdAt: serverTimestamp(),
-      });
-      for (const name of selected) {
-        await addDoc(collection(db, "projects", projectDoc.id, "networks"), { name, createdAt: serverTimestamp() });
+    document.querySelector("#create-network-form").onsubmit = (event) => {
+      event.preventDefault();
+      syncRubrics();
+      const input = event.currentTarget.elements.name;
+      const name = input.value.trim();
+      if (!name) {
+        input.setCustomValidity("Введите название соцсети.");
+        event.currentTarget.reportValidity();
+        input.setCustomValidity("");
+        return;
       }
-      await loadProjects();
-      renderRubricSetup(projectById(projectDoc.id), { firstRun: true });
-    } catch (error) {
-      showMessage(readError(error));
-    }
+      if (draft.networks.some((network) => network.name.toLocaleLowerCase("ru") === name.toLocaleLowerCase("ru"))) {
+        showMessage("Такая соцсеть уже добавлена.");
+        return;
+      }
+      draft.networks.push({ key: `network-${nextNetworkKey}`, name });
+      nextNetworkKey += 1;
+      input.value = "";
+      drawSetup();
+    };
+    document.querySelector("[data-add-create-rubric]").onclick = () => {
+      syncRubrics();
+      draft.rubrics.push({ name: "", networkKeys: [] });
+      drawSetup();
+    };
+    document.querySelector("#create-project-form").onsubmit = async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      syncRubrics();
+      const validRubrics = draft.rubrics
+        .map((rubric) => ({ name: rubric.name.trim(), networkKeys: rubric.networkKeys }))
+        .filter((rubric) => rubric.name);
+      const submitButton = form.querySelector("[data-finish-create]");
+      try {
+        if (!draft.networks.length) throw new Error("Добавьте хотя бы одну соцсеть.");
+        if (!validRubrics.length) throw new Error("Добавьте хотя бы одну рубрику.");
+        if (validRubrics.some((rubric) => !rubric.networkKeys.length)) {
+          throw new Error("Для каждой рубрики выберите хотя бы одну соцсеть.");
+        }
+        submitButton.disabled = true;
+        submitButton.textContent = "Создаю…";
+        const shareCode = await uniqueCode();
+        const projectDoc = await addDoc(collection(db, "projects"), {
+          ownerId: user.uid,
+          name: draft.name,
+          description: draft.description,
+          shareCode,
+          planStartDate: todayIso(),
+          createdAt: serverTimestamp(),
+        });
+        await setDoc(doc(db, "memberships", `${projectDoc.id}_${user.uid}`), {
+          projectId: projectDoc.id,
+          userId: user.uid,
+          role: "owner",
+          userName: user.displayName || "Владелец",
+          userEmail: user.email || "",
+          joinedAt: serverTimestamp(),
+        });
+        await setDoc(doc(db, "invitations", shareCode), {
+          projectId: projectDoc.id,
+          role: "viewer",
+          active: true,
+          createdAt: serverTimestamp(),
+        });
+        const networkIds = new Map();
+        for (const network of draft.networks) {
+          const networkDoc = await addDoc(collection(db, "projects", projectDoc.id, "networks"), {
+            name: network.name,
+            createdAt: serverTimestamp(),
+          });
+          networkIds.set(network.key, networkDoc.id);
+        }
+        for (const rubric of validRubrics) {
+          await addDoc(collection(db, "projects", projectDoc.id, "rubrics"), {
+            name: rubric.name,
+            networkIds: rubric.networkKeys.map((key) => networkIds.get(key)),
+            createdAt: serverTimestamp(),
+          });
+        }
+        await loadProjects();
+        renderNetworkSelection(projectById(projectDoc.id));
+      } catch (error) {
+        submitButton.disabled = false;
+        submitButton.textContent = "Создать проект";
+        showMessage(readError(error), "error", form);
+      }
+    };
   };
+
+  renderDetailsStep();
 }
 
 async function uniqueCode() {
@@ -747,14 +870,27 @@ async function renderProjectSettings(project) {
 }
 
 async function deleteProject(project) {
+  const snapshots = [];
   for (const subcollection of ["networks", "rubrics", "posts", "postImages", "comments"]) {
-    const snapshot = await getDocs(collection(db, "projects", project.id, subcollection));
+    try {
+      snapshots.push(await getDocs(collection(db, "projects", project.id, subcollection)));
+    } catch (error) {
+      if (subcollection === "postImages" && error?.code === "permission-denied") {
+        throw new Error("Firestore не разрешил удалить изображения. Опубликуйте актуальный файл firestore.rules в Firebase и повторите удаление.");
+      }
+      throw error;
+    }
+  }
+  for (const snapshot of snapshots) {
     for (const item of snapshot.docs) await deleteDoc(item.ref);
   }
   const members = await getDocs(query(collection(db, "memberships"), where("projectId", "==", project.id)));
-  const ownerMembership = members.docs.find((item) => item.data().userId === user.uid);
+  const expectedOwnerMembershipId = `${project.id}_${user.uid}`;
+  const ownerMembership = members.docs.find((item) => item.id === expectedOwnerMembershipId)
+    || members.docs.find((item) => item.data().userId === user.uid && item.data().role === "owner");
+  if (!ownerMembership) throw new Error("Не найдена запись владельца проекта. Обновите страницу и повторите удаление.");
   for (const member of members.docs) {
-    if (member !== ownerMembership) await deleteDoc(member.ref);
+    if (member.id !== ownerMembership.id) await deleteDoc(member.ref);
   }
   if (project.shareCode) {
     const invitationRef = doc(db, "invitations", project.shareCode);
@@ -762,7 +898,7 @@ async function deleteProject(project) {
     if (invitationSnapshot.exists()) await deleteDoc(invitationRef);
   }
   await deleteDoc(doc(db, "projects", project.id));
-  if (ownerMembership) await deleteDoc(ownerMembership.ref);
+  await deleteDoc(ownerMembership.ref);
 }
 
 async function renderAccess(project) {
@@ -916,6 +1052,14 @@ function drawPlan(project, network, rubrics, posts) {
   });
 }
 
+function openImageViewer(url, label) {
+  openModal(
+    label,
+    `<div class="image-viewer"><img src="${esc(url)}" alt="${esc(label)}"></div>`,
+    "image-viewer-modal",
+  );
+}
+
 async function openPostEditor({ project, network, rubric, date, post }) {
   const editable = canEdit(project.role);
   const commentable = canComment(project.role);
@@ -949,7 +1093,7 @@ async function openPostEditor({ project, network, rubric, date, post }) {
       <label>${label}<input type="file" name="${name}" accept="image/*" multiple ${disabled}></label>
       <div class="image-preview">
         ${images.map((image) => `<span class="image-preview-item">
-          <a href="${esc(image.url)}" target="_blank" rel="noreferrer"><img src="${esc(image.url)}" alt="${esc(label)}"></a>
+          <button type="button" class="image-preview-button" data-view-image="${esc(image.url)}" aria-label="Открыть изображение: ${esc(label)}"><img src="${esc(image.url)}" alt="${esc(label)}"></button>
           ${editable && image.id ? `<button type="button" class="image-remove" data-delete-image="${image.id}" aria-label="Удалить изображение">×</button>` : ""}
         </span>`).join("") || '<span class="muted">Изображения не добавлены</span>'}
       </div>
@@ -995,6 +1139,9 @@ async function openPostEditor({ project, network, rubric, date, post }) {
   );
 
   const form = modal.querySelector("#post-form");
+  modal.querySelectorAll("[data-view-image]").forEach((button) => {
+    button.onclick = () => openImageViewer(button.dataset.viewImage, button.querySelector("img").alt);
+  });
   if (editable) {
     modal.querySelectorAll("[data-delete-image]").forEach((button) => {
       button.onclick = async () => {
