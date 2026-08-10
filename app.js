@@ -1,32 +1,926 @@
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js';
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js';
-import { getFirestore, collection, doc, addDoc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, orderBy, serverTimestamp } from 'https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js';
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-app.js";
+import {
+  getAuth,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile,
+  onAuthStateChanged,
+} from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
+import {
+  getFirestore,
+  collection,
+  doc,
+  addDoc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  serverTimestamp,
+} from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-const firebaseConfig = { apiKey:'AIzaSyD3X0A-r34omGmCmm2v1eXIm_bATY6G_Yw', authDomain:'content-planner-aef9e.firebaseapp.com', projectId:'content-planner-aef9e', storageBucket:'content-planner-aef9e.firebasestorage.app', messagingSenderId:'879380511083', appId:'1:879380511083:web:a1e8f9a5f0d5cdb372b42e' };
-const firebaseApp = initializeApp(firebaseConfig); const auth = getAuth(firebaseApp); const db = getFirestore(firebaseApp);
-const app = document.querySelector('#app');
-let user = null, projects = [], currentProject = null, currentRole = null;
-const esc = (value='') => String(value).replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
-const roleLabel = role => ({owner:'Владелец',editor:'Редактор',commenter:'Комментатор',viewer:'Читатель'}[role] || role);
-function show(message, type='error') { const spot=document.querySelector('[data-message]'); if (spot) spot.innerHTML=`<p class="${type}">${esc(message)}</p>`; }
-function modal(title, content) { app.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" data-modal><section class="modal card"><button class="close" aria-label="Закрыть">×</button><h2>${title}</h2>${content}</section></div>`); document.querySelector('[data-modal] .close').onclick=()=>document.querySelector('[data-modal]').remove(); }
-function authScreen(mode='welcome') { const body = mode==='welcome' ? `<p class="subtitle">Собирайте идеи, рубрики и публикации в одном спокойном пространстве.</p><div class="actions"><button class="button primary" data-open="login">Войти</button><button class="button" data-open="register">Зарегистрироваться</button><button class="link-button" data-open="join">У меня есть код проекта</button></div>` : authForm(mode); app.innerHTML=`<section class="screen auth-screen"><div class="card auth-card"><h1>Контент-план</h1>${body}<div data-message></div></div></section>`; app.querySelectorAll('[data-open]').forEach(button=>button.onclick=()=>authScreen(button.dataset.open)); if (mode!=='welcome') bindAuthForm(mode); }
-function authForm(mode) { const register=mode==='register', join=mode==='join'; return `<p class="subtitle">${register?'Создайте аккаунт — ваши проекты будут храниться в облаке.':join?'Войдите или создайте аккаунт, затем введите код приглашения.':'Рады видеть вас снова.'}</p><form class="form" id="auth-form">${register?'<label>Ваше имя<input name="name" required maxlength="60" autocomplete="name"></label>':''}<label>Email<input name="email" type="email" required autocomplete="email"></label><label>Пароль<input name="password" type="password" required minlength="6" autocomplete="current-password"></label>${join?'<label>Код проекта<input name="code" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" placeholder="12345678" required></label>':''}<button class="button primary">${register?'Создать аккаунт':join?'Войти и присоединиться':'Войти'}</button><button type="button" class="link-button" data-back>Назад</button></form><div data-message></div>`; }
-function bindAuthForm(mode) { document.querySelector('[data-back]').onclick=()=>authScreen(); document.querySelector('#auth-form').onsubmit=async event=>{ event.preventDefault(); const data=new FormData(event.currentTarget); try { let credential; if(mode==='register') { credential=await createUserWithEmailAndPassword(auth,data.get('email'),data.get('password')); await updateProfile(credential.user,{displayName:data.get('name')}); await setDoc(doc(db,'profiles',credential.user.uid),{name:data.get('name'),email:data.get('email'),createdAt:serverTimestamp()}); } else { credential=await signInWithEmailAndPassword(auth,data.get('email'),data.get('password')); } if(mode==='join') await joinByCode(data.get('code')); } catch(error) { show(readError(error)); } }; }
-function readError(error) { return ({'auth/email-already-in-use':'Этот email уже зарегистрирован. Войдите в аккаунт.','auth/invalid-credential':'Неверный email или пароль.','auth/weak-password':'Пароль должен содержать минимум 6 символов.','permission-denied':'Нет доступа. Проверьте правила Firestore.'}[error.code] || error.message); }
-async function joinByCode(code) { const clean=String(code).replace(/\D/g,''); if(clean.length!==8) throw new Error('Введите 8 цифр кода.'); const invitation=await getDoc(doc(db,'invitations',clean)); if(!invitation.exists() || !invitation.data().active) throw new Error('Код не найден или больше не действует.'); const invite=invitation.data(); await setDoc(doc(db,'memberships',`${invite.projectId}_${user.uid}`),{projectId:invite.projectId,userId:user.uid,role:invite.role,inviteCode:clean,joinedAt:serverTimestamp()}); alert(`Готово! Вам выдана роль: ${roleLabel(invite.role)}.`); await loadProjects(); }
-async function loadProjects() { if(!user) return; const memberships=await getDocs(query(collection(db,'memberships'),where('userId','==',user.uid))); const loaded=[]; for(const membership of memberships.docs){ const project=await getDoc(doc(db,'projects',membership.data().projectId)); if(project.exists()) loaded.push({id:project.id,...project.data(),role:membership.data().role}); } projects=loaded.sort((a,b)=>(a.name||'').localeCompare(b.name||'', 'ru')); if(currentProject) currentProject=projects.find(project=>project.id===currentProject.id)||null; renderDashboard(); }
-function renderDashboard() { app.innerHTML=`<section class="screen"><div class="dashboard"><aside class="sidebar card"><div class="brand">Контент-план</div><button class="button primary" data-create>+ Создать проект</button><hr><p class="muted">Мои проекты</p><nav class="nav-projects">${projects.map(project=>`<button class="project-nav ${currentProject?.id===project.id?'active':''}" data-project="${project.id}">${esc(project.name)}</button>`).join('')||'<p class="muted">Пока нет проектов</p>'}</nav><br><button class="link-button" data-join>Ввести код проекта</button><br><button class="link-button" data-signout>Выйти</button></aside><main class="content">${currentProject?projectView():homeView()}</main></div></section>`; document.querySelector('[data-create]').onclick=createProjectModal; document.querySelector('[data-join]').onclick=joinModal; document.querySelector('[data-signout]').onclick=()=>signOut(auth); app.querySelectorAll('[data-project]').forEach(button=>button.onclick=()=>{currentProject=projects.find(project=>project.id===button.dataset.project);currentRole=currentProject.role;renderDashboard();}); bindProjectView(); }
-function homeView(){ return `<div class="topbar"><div><h1>Здравствуйте, ${esc(user.displayName || 'друг')}!</h1><p class="subtitle">С чего начнём?</p></div></div><section class="panel card empty"><h2>Ваши проекты</h2><p>${projects.length?'Выберите проект слева или создайте новый.':'Создайте первый проект или присоединитесь по коду.'}</p><div class="quick-actions"><button class="button primary" data-home-create>Создать проект</button><button class="button" data-home-join>Ввести код</button></div></section>`; }
-function projectView(){ return `<div class="project-header"><div><button class="link-button" data-back-home>← Все проекты</button><h1>${esc(currentProject.name)}</h1><p class="subtitle">${esc(currentProject.description || 'Описание пока не добавлено')}</p></div><span class="role">${roleLabel(currentProject.role)}</span></div><section class="panel card"><div class="quick-actions"><button class="button primary" data-tab="plan">Открыть контент-план</button><button class="button" data-tab="networks">Настроить соцсети</button>${currentProject.role==='owner'?'<button class="button ghost" data-tab="share">Поделиться</button>':''}</div><div class="tabs"><button class="tab active" data-tab="plan">Контент-план</button><button class="tab" data-tab="networks">Соцсети</button><button class="tab" data-tab="rubrics">Рубрики</button>${currentProject.role==='owner'?'<button class="tab" data-tab="share">Доступ</button>':''}</div><div id="project-panel"></div></section>`; }
-function bindProjectView(){ app.querySelector('[data-home-create]')?.addEventListener('click',createProjectModal); app.querySelector('[data-home-join]')?.addEventListener('click',joinModal); app.querySelector('[data-back-home]')?.addEventListener('click',()=>{currentProject=null;renderDashboard();}); app.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>openTab(button.dataset.tab)); if(currentProject) openTab('plan'); }
-async function openTab(tab){ app.querySelectorAll('[data-tab]').forEach(button=>button.classList.toggle('active',button.dataset.tab===tab)); const panel=document.querySelector('#project-panel'); panel.innerHTML='<p class="muted">Загружаю…</p>'; if(tab==='networks') return networksPanel(panel); if(tab==='rubrics') return rubricsPanel(panel); if(tab==='share') return sharePanel(panel); return planPanel(panel); }
-function canEdit(){return ['owner','editor'].includes(currentProject.role);} 
-async function networksPanel(panel){const snaps=await getDocs(collection(db,'projects',currentProject.id,'networks')); const names=snaps.docs.map(item=>({id:item.id,...item.data()})); panel.innerHTML=`<h2>Соцсети</h2><p class="subtitle">Выберите площадки для этого проекта. Контент-план можно открыть и без выбора.</p><div class="chips">${names.map(network=>`<span class="chip">${esc(network.name)}${canEdit()?` <button class="link-button" data-del-network="${network.id}">×</button>`:''}</span>`).join('')||'<p class="muted">Площадки ещё не добавлены.</p>'}</div>${canEdit()?'<form class="form" id="network-form"><label>Новая соцсеть<input name="name" required placeholder="Например, Telegram"></label><button class="button small">Добавить</button></form>':''}`; panel.querySelector('#network-form')?.addEventListener('submit',async event=>{event.preventDefault();const name=new FormData(event.currentTarget).get('name').trim();if(name){await addDoc(collection(db,'projects',currentProject.id,'networks'),{name,createdAt:serverTimestamp()});networksPanel(panel);}}); panel.querySelectorAll('[data-del-network]').forEach(button=>button.onclick=async()=>{await deleteDoc(doc(db,'projects',currentProject.id,'networks',button.dataset.delNetwork));networksPanel(panel);});}
-async function rubricsPanel(panel){const snaps=await getDocs(collection(db,'projects',currentProject.id,'rubrics'));const rubrics=snaps.docs.map(item=>({id:item.id,...item.data()}));panel.innerHTML=`<h2>Рубрики</h2><div class="chips">${rubrics.map(rubric=>`<span class="chip">${esc(rubric.name)}${canEdit()?` <button class="link-button" data-del-rubric="${rubric.id}">×</button>`:''}</span>`).join('')||'<p class="muted">Добавьте рубрики, чтобы структурировать идеи.</p>'}</div>${canEdit()?'<form class="form" id="rubric-form"><label>Новая рубрика<input name="name" required placeholder="Например, Экспертность"></label><button class="button small">Добавить</button></form>':''}`;panel.querySelector('#rubric-form')?.addEventListener('submit',async event=>{event.preventDefault();const name=new FormData(event.currentTarget).get('name').trim();if(name){await addDoc(collection(db,'projects',currentProject.id,'rubrics'),{name,createdAt:serverTimestamp()});rubricsPanel(panel);}});panel.querySelectorAll('[data-del-rubric]').forEach(button=>button.onclick=async()=>{await deleteDoc(doc(db,'projects',currentProject.id,'rubrics',button.dataset.delRubric));rubricsPanel(panel);});}
-async function planPanel(panel){const snaps=await getDocs(query(collection(db,'projects',currentProject.id,'posts'),orderBy('date','asc')));const posts=snaps.docs.map(item=>({id:item.id,...item.data()}));panel.innerHTML=`<div class="plan-toolbar"><div><h2>Контент-план</h2><p class="subtitle">Публикации для всех выбранных площадок.</p></div>${canEdit()?'<button class="button primary" data-add-post>+ Добавить публикацию</button>':''}</div><div class="table-wrap"><table class="plan-table"><thead><tr><th>Дата</th><th>Соцсеть</th><th>Рубрика</th><th>Тема</th><th>Статус</th></tr></thead><tbody>${posts.map(post=>`<tr><td>${esc(post.date||'—')}</td><td>${esc(post.network||'—')}</td><td>${esc(post.rubric||'—')}</td><td>${esc(post.title||'—')}</td><td><span class="status">${esc(post.status||'Идея')}</span></td></tr>`).join('')||'<tr><td colspan="5" class="muted">Пока нет публикаций.</td></tr>'}</tbody></table></div>`; panel.querySelector('[data-add-post]')?.addEventListener('click',postModal);}
-async function sharePanel(panel){const code=currentProject.shareCode;panel.innerHTML=`<h2>Доступ к проекту</h2><p class="subtitle">Передайте код человеку, которому хотите открыть проект. Он войдёт в аккаунт и введёт код на главном экране.</p><div class="code-box"><span>Код:</span><span class="code">${code}</span><button class="button small" data-copy>Копировать</button></div><form class="form" id="share-form"><label>Роль по коду<select name="role"><option value="viewer">Читатель</option><option value="commenter">Комментатор</option><option value="editor">Редактор</option></select></label><button class="button">Сохранить роль</button></form>`;panel.querySelector('[data-copy]').onclick=async()=>{await navigator.clipboard.writeText(code);panel.querySelector('[data-copy]').textContent='Скопировано';};panel.querySelector('#share-form').onsubmit=async event=>{event.preventDefault();const role=new FormData(event.currentTarget).get('role');await updateDoc(doc(db,'invitations',code),{role});show('Роль по коду обновлена.');};}
-function createProjectModal(){modal('Новый проект',`<p class="subtitle">Название и описание заполняются только один раз — при создании.</p><form class="form" id="create-project"><label>Название проекта<input name="name" required maxlength="80" placeholder="Например, Блог кофейни"></label><label>О проекте<textarea name="description" maxlength="400" placeholder="Чем занимается проект?"></textarea></label><button class="button primary">Создать проект</button><div data-message></div></form>`);document.querySelector('#create-project').onsubmit=async event=>{event.preventDefault();const data=new FormData(event.currentTarget);try{const shareCode=await uniqueCode();const project=await addDoc(collection(db,'projects'),{ownerId:user.uid,name:data.get('name').trim(),description:data.get('description').trim(),shareCode,createdAt:serverTimestamp()});await setDoc(doc(db,'memberships',`${project.id}_${user.uid}`),{projectId:project.id,userId:user.uid,role:'owner',joinedAt:serverTimestamp()});await setDoc(doc(db,'invitations',shareCode),{projectId:project.id,role:'viewer',active:true,createdAt:serverTimestamp()});document.querySelector('[data-modal]').remove();await loadProjects();currentProject=projects.find(item=>item.id===project.id);currentRole='owner';renderDashboard();}catch(error){show(readError(error));}};}
-async function uniqueCode(){for(let i=0;i<10;i++){const code=String(Math.floor(10000000+Math.random()*90000000));if(!(await getDoc(doc(db,'invitations',code))).exists())return code;}throw new Error('Не получилось создать код. Попробуйте ещё раз.');}
-function joinModal(){modal('Присоединиться к проекту',`<p class="subtitle">Введите восьмизначный код, который прислал владелец.</p><form class="form" id="join-form"><label>Код проекта<input name="code" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" placeholder="12345678" required></label><button class="button primary">Присоединиться</button><div data-message></div></form>`);document.querySelector('#join-form').onsubmit=async event=>{event.preventDefault();try{await joinByCode(new FormData(event.currentTarget).get('code'));document.querySelector('[data-modal]')?.remove();}catch(error){show(error.message||readError(error));}};}
-onAuthStateChanged(auth, async nextUser=>{user=nextUser;if(user){try{await loadProjects();}catch(error){app.innerHTML=`<section class="screen auth-screen"><div class="card auth-card"><h2>Нужно добавить правила доступа</h2><p class="subtitle">База защищена — это хорошо. Следующим шагом добавим подготовленные правила Firestore.</p><p class="error">${esc(readError(error))}</p><button class="button" onclick="location.reload()">Обновить</button></div></section>`;}}else authScreen();});
+const firebaseConfig = {
+  apiKey: "AIzaSyD3X0A-r34omGmCmm2v1eXIm_bATY6G_Yw",
+  authDomain: "content-planner-aef9e.firebaseapp.com",
+  projectId: "content-planner-aef9e",
+  storageBucket: "content-planner-aef9e.firebasestorage.app",
+  messagingSenderId: "879380511083",
+  appId: "1:879380511083:web:a1e8f9a5f0d5cdb372b42e",
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
+const app = document.querySelector("#app");
+
+const DEFAULT_NETWORKS = ["Telegram", "ВКонтакте", "Instagram", "YouTube", "TikTok", "Дзен"];
+const ROLE_LABELS = {
+  owner: "Владелец",
+  editor: "Редактор",
+  commenter: "Комментатор",
+  viewer: "Читатель",
+};
+const POST_STATUSES = ["Идея", "В работе", "На согласовании", "Готово", "Опубликовано"];
+
+let user = null;
+let projects = [];
+let planZoom = 1;
+let planOffset = 0;
+
+const esc = (value = "") =>
+  String(value).replace(/[&<>'"]/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "'": "&#39;",
+    '"': "&quot;",
+  })[char]);
+
+const initials = () => {
+  const source = user?.displayName || user?.email || "А";
+  return source
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+};
+
+const roleLabel = (role) => ROLE_LABELS[role] || role;
+const canEdit = (role) => ["owner", "editor"].includes(role);
+const canComment = (role) => ["owner", "editor", "commenter"].includes(role);
+const todayIso = () => new Date().toISOString().slice(0, 10);
+
+function addDays(iso, amount) {
+  const date = new Date(`${iso}T12:00:00`);
+  date.setDate(date.getDate() + amount);
+  return date.toISOString().slice(0, 10);
+}
+
+function formatDate(iso) {
+  return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit" }).format(
+    new Date(`${iso}T12:00:00`),
+  );
+}
+
+function readError(error) {
+  return ({
+    "auth/email-already-in-use": "Этот email уже зарегистрирован. Войдите в аккаунт.",
+    "auth/invalid-credential": "Неверный email или пароль.",
+    "auth/weak-password": "Пароль должен содержать минимум 6 символов.",
+    "permission-denied": "Нет доступа к этому действию.",
+  })[error?.code] || error?.message || "Что-то пошло не так. Попробуйте ещё раз.";
+}
+
+function showMessage(message, type = "error", root = document) {
+  const spot = root.querySelector("[data-message]");
+  if (spot) spot.innerHTML = `<p class="${type}">${esc(message)}</p>`;
+}
+
+function loader(label = "Загружаю…") {
+  app.innerHTML = `<div class="loader">${esc(label)}</div>`;
+}
+
+function accountMarkup() {
+  return `
+    <div class="account-wrap">
+      <button class="account-button" data-account aria-label="Открыть меню аккаунта">${esc(initials())}</button>
+      <div class="account-menu hidden" data-account-menu>
+        <div class="account-name"><strong>${esc(user?.displayName || "Аккаунт")}</strong><br><small>${esc(user?.email || "")}</small></div>
+        <button data-go-home>Выйти на главный экран</button>
+        <button data-signout>Выйти из аккаунта</button>
+      </div>
+    </div>`;
+}
+
+function bindAccountMenu() {
+  const button = document.querySelector("[data-account]");
+  const menu = document.querySelector("[data-account-menu]");
+  if (!button || !menu) return;
+
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    menu.classList.toggle("hidden");
+  });
+  document.onclick = (event) => {
+    if (!event.target.closest(".account-wrap")) menu.classList.add("hidden");
+    if (!event.target.closest(".project-row")) {
+      document.querySelectorAll("[data-project-menu]").forEach((item) => item.classList.add("hidden"));
+    }
+  };
+  menu.addEventListener("click", (event) => event.stopPropagation());
+  menu.querySelector("[data-go-home]").onclick = () => {
+    const url = new URL(window.location.href);
+    url.search = "";
+    window.location.href = url.toString();
+  };
+  menu.querySelector("[data-signout]").onclick = () => signOut(auth);
+}
+
+function pageTopbar(backLabel = "", onBack = null) {
+  return `
+    <div class="page-topbar">
+      ${backLabel ? `<button class="back-button" data-back>← ${esc(backLabel)}</button>` : "<span></span>"}
+      ${accountMarkup()}
+    </div>`;
+}
+
+function bindTopbar(onBack = null) {
+  if (onBack) document.querySelector("[data-back]")?.addEventListener("click", onBack);
+  bindAccountMenu();
+}
+
+function openModal(title, content, size = "") {
+  app.insertAdjacentHTML(
+    "beforeend",
+    `<div class="modal-backdrop" data-modal>
+      <section class="modal card ${size}">
+        <button class="close" data-close aria-label="Закрыть">×</button>
+        <h2>${esc(title)}</h2>
+        ${content}
+      </section>
+    </div>`,
+  );
+  const modal = document.querySelector("[data-modal]");
+  modal.querySelector("[data-close]").onclick = () => modal.remove();
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) modal.remove();
+  });
+  return modal;
+}
+
+/* ---------------- Авторизация ---------------- */
+
+function renderAuth(mode = "welcome") {
+  const welcome = `
+    <p class="subtitle">Создавайте контент-планы по соцсетям, распределяйте публикации по рубрикам и работайте вместе с командой.</p>
+    <div class="auth-actions">
+      <button class="button primary" data-auth-mode="login">Войти</button>
+      <button class="button" data-auth-mode="register">Зарегистрироваться</button>
+    </div>`;
+
+  const isRegister = mode === "register";
+  const form = `
+    <p class="subtitle">${isRegister ? "Создайте аккаунт, чтобы хранить проекты и приглашать участников." : "Введите email и пароль, указанные при регистрации."}</p>
+    <form class="form" id="auth-form">
+      ${isRegister ? '<label>Имя<input name="name" required maxlength="60" autocomplete="name"></label>' : ""}
+      <label>Email<input name="email" type="email" required autocomplete="email"></label>
+      <label>Пароль<input name="password" type="password" required minlength="6" autocomplete="current-password"></label>
+      <button class="button primary">${isRegister ? "Создать аккаунт" : "Войти"}</button>
+      <button type="button" class="link-button" data-auth-back>Назад</button>
+    </form>
+    <div data-message></div>`;
+
+  app.innerHTML = `<section class="screen auth-screen"><div class="card auth-card"><h1>Контент-<br>план</h1>${mode === "welcome" ? welcome : form}</div></section>`;
+  document.querySelectorAll("[data-auth-mode]").forEach((button) => {
+    button.onclick = () => renderAuth(button.dataset.authMode);
+  });
+  document.querySelector("[data-auth-back]")?.addEventListener("click", () => renderAuth());
+
+  const authForm = document.querySelector("#auth-form");
+  if (!authForm) return;
+  authForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const data = new FormData(authForm);
+    try {
+      if (isRegister) {
+        const credential = await createUserWithEmailAndPassword(auth, data.get("email"), data.get("password"));
+        const name = data.get("name").trim();
+        await updateProfile(credential.user, { displayName: name });
+        await setDoc(doc(db, "profiles", credential.user.uid), {
+          name,
+          email: data.get("email"),
+          createdAt: serverTimestamp(),
+        });
+      } else {
+        await signInWithEmailAndPassword(auth, data.get("email"), data.get("password"));
+      }
+    } catch (error) {
+      showMessage(readError(error));
+    }
+  };
+}
+
+/* ---------------- Данные и главный экран ---------------- */
+
+async function loadProjects() {
+  const membershipSnapshot = await getDocs(query(collection(db, "memberships"), where("userId", "==", user.uid)));
+  const loaded = [];
+  for (const membershipDoc of membershipSnapshot.docs) {
+    const membership = membershipDoc.data();
+    const projectDoc = await getDoc(doc(db, "projects", membership.projectId));
+    if (projectDoc.exists()) loaded.push({ id: projectDoc.id, ...projectDoc.data(), role: membership.role });
+  }
+  projects = loaded.sort((a, b) => (a.name || "").localeCompare(b.name || "", "ru"));
+  return projects;
+}
+
+function projectById(id) {
+  return projects.find((project) => project.id === id);
+}
+
+async function renderDashboard() {
+  if (!projects.length) await loadProjects();
+  app.innerHTML = `
+    <section class="screen">
+      <div class="dashboard">
+        <aside class="sidebar card">
+          <button class="button primary sidebar-create" data-create-project>+ Создать проект</button>
+          <p class="sidebar-title">Мои проекты</p>
+          <nav class="project-list">
+            ${projects.length ? projects.map((project) => `
+              <div class="project-row">
+                <button class="project-open" data-open-project="${project.id}">${esc(project.name)}</button>
+                ${project.role === "owner" ? `<button class="project-more" data-project-more="${project.id}" aria-label="Настройки проекта">•••</button>
+                  <div class="project-context hidden" data-project-menu="${project.id}">
+                    <button data-project-settings="${project.id}">Настройки</button>
+                    <button data-project-access="${project.id}">Доступ</button>
+                  </div>` : ""}
+              </div>`).join("") : '<p class="muted">Проектов пока нет</p>'}
+          </nav>
+          <div class="sidebar-footer"><button class="link-button" data-join-project>Ввести код проекта</button></div>
+        </aside>
+        <main class="dashboard-main">
+          <div class="page-topbar"><span></span>${accountMarkup()}</div>
+          <div class="welcome-copy">
+            <h1>Здравствуйте, ${esc(user.displayName || "друг")}!</h1>
+            <p class="subtitle">С чего начнём?</p>
+          </div>
+        </main>
+      </div>
+    </section>`;
+
+  bindAccountMenu();
+  document.querySelector("[data-create-project]").onclick = renderCreateProject;
+  document.querySelector("[data-join-project]").onclick = openJoinModal;
+  document.querySelectorAll("[data-open-project]").forEach((button) => {
+    button.onclick = () => renderNetworkSelection(projectById(button.dataset.openProject));
+  });
+  document.querySelectorAll("[data-project-more]").forEach((button) => {
+    button.onclick = (event) => {
+      event.stopPropagation();
+      const menu = document.querySelector(`[data-project-menu="${button.dataset.projectMore}"]`);
+      document.querySelectorAll("[data-project-menu]").forEach((item) => {
+        if (item !== menu) item.classList.add("hidden");
+      });
+      menu.classList.toggle("hidden");
+    };
+  });
+  document.querySelectorAll("[data-project-settings]").forEach((button) => {
+    button.onclick = () => renderProjectSettings(projectById(button.dataset.projectSettings));
+  });
+  document.querySelectorAll("[data-project-access]").forEach((button) => {
+    button.onclick = () => renderAccess(projectById(button.dataset.projectAccess));
+  });
+}
+
+function openJoinModal() {
+  const modal = openModal(
+    "Присоединиться к проекту",
+    `<p class="subtitle">Введите восьмизначный код, который прислал владелец проекта.</p>
+     <form class="form" id="join-form">
+       <label>Код проекта<input name="code" inputmode="numeric" pattern="[0-9]{8}" maxlength="8" placeholder="12345678" required></label>
+       <button class="button primary">Присоединиться</button>
+       <div data-message></div>
+     </form>`,
+    "medium",
+  );
+  modal.querySelector("#join-form").onsubmit = async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const code = String(new FormData(form).get("code")).replace(/\D/g, "");
+    try {
+      if (code.length !== 8) throw new Error("Введите восемь цифр кода.");
+      const invitationDoc = await getDoc(doc(db, "invitations", code));
+      if (!invitationDoc.exists() || !invitationDoc.data().active) throw new Error("Код не найден или больше не действует.");
+      const invitation = invitationDoc.data();
+      await setDoc(doc(db, "memberships", `${invitation.projectId}_${user.uid}`), {
+        projectId: invitation.projectId,
+        userId: user.uid,
+        role: "viewer",
+        inviteCode: code,
+        userName: user.displayName || "Участник",
+        userEmail: user.email || "",
+        joinedAt: serverTimestamp(),
+      });
+      modal.remove();
+      await loadProjects();
+      renderNetworkSelection(projectById(invitation.projectId));
+    } catch (error) {
+      showMessage(readError(error), "error", modal);
+    }
+  };
+}
+
+/* ---------------- Создание проекта ---------------- */
+
+function renderCreateProject() {
+  const selected = new Set();
+  const customNetworks = [];
+
+  const redrawNetworks = () => {
+    const root = document.querySelector("[data-network-options]");
+    const all = [...DEFAULT_NETWORKS, ...customNetworks];
+    root.innerHTML = all.map((name) => `<button type="button" class="network-choice ${selected.has(name) ? "selected" : ""}" data-network-name="${esc(name)}">${esc(name)}</button>`).join("");
+    root.querySelectorAll("[data-network-name]").forEach((button) => {
+      button.onclick = () => {
+        const name = button.dataset.networkName;
+        if (selected.has(name)) selected.delete(name); else selected.add(name);
+        redrawNetworks();
+      };
+    });
+  };
+
+  app.innerHTML = `
+    <section class="screen flow-screen">
+      ${pageTopbar("На главный экран")}
+      <div class="flow-card card">
+        <h1>Новый проект</h1>
+        <p class="subtitle">Добавьте основную информацию и площадки, для которых планируете контент.</p>
+        <form class="form" id="create-project-form">
+          <label>Название <input name="name" required maxlength="80" placeholder="Название бренда, клиента или направления"></label>
+          <label>О проекте <textarea name="description" maxlength="600" placeholder="Кратко опишите продукт, аудиторию и задачи контента"></textarea></label>
+          <fieldset>
+            <legend>Соцсети</legend>
+            <div class="network-options" data-network-options></div>
+            <div class="custom-network">
+              <input data-custom-network maxlength="40" placeholder="Другая площадка">
+              <button type="button" class="button ghost" data-add-network>Добавить в список</button>
+            </div>
+          </fieldset>
+          <div data-message></div>
+          <div class="flow-actions"><span></span><button class="button primary">Сохранить и перейти к рубрикам</button></div>
+        </form>
+      </div>
+    </section>`;
+
+  bindTopbar(renderDashboard);
+  redrawNetworks();
+  document.querySelector("[data-add-network]").onclick = () => {
+    const input = document.querySelector("[data-custom-network]");
+    const name = input.value.trim();
+    if (!name) return;
+    if (![...DEFAULT_NETWORKS, ...customNetworks].includes(name)) customNetworks.push(name);
+    selected.add(name);
+    input.value = "";
+    redrawNetworks();
+  };
+
+  document.querySelector("#create-project-form").onsubmit = async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    try {
+      if (!selected.size) throw new Error("Выберите хотя бы одну соцсеть.");
+      const shareCode = await uniqueCode();
+      const projectDoc = await addDoc(collection(db, "projects"), {
+        ownerId: user.uid,
+        name: data.get("name").trim(),
+        description: data.get("description").trim(),
+        shareCode,
+        planStartDate: todayIso(),
+        createdAt: serverTimestamp(),
+      });
+      await setDoc(doc(db, "memberships", `${projectDoc.id}_${user.uid}`), {
+        projectId: projectDoc.id,
+        userId: user.uid,
+        role: "owner",
+        userName: user.displayName || "Владелец",
+        userEmail: user.email || "",
+        joinedAt: serverTimestamp(),
+      });
+      await setDoc(doc(db, "invitations", shareCode), {
+        projectId: projectDoc.id,
+        role: "viewer",
+        active: true,
+        createdAt: serverTimestamp(),
+      });
+      for (const name of selected) {
+        await addDoc(collection(db, "projects", projectDoc.id, "networks"), { name, createdAt: serverTimestamp() });
+      }
+      await loadProjects();
+      renderRubricSetup(projectById(projectDoc.id), { firstRun: true });
+    } catch (error) {
+      showMessage(readError(error));
+    }
+  };
+}
+
+async function uniqueCode() {
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const code = String(Math.floor(10000000 + Math.random() * 90000000));
+    if (!(await getDoc(doc(db, "invitations", code))).exists()) return code;
+  }
+  throw new Error("Не удалось создать код проекта. Попробуйте ещё раз.");
+}
+
+/* ---------------- Соцсети и рубрики ---------------- */
+
+async function getNetworks(projectId) {
+  const snapshot = await getDocs(collection(db, "projects", projectId, "networks"));
+  return snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => a.name.localeCompare(b.name, "ru"));
+}
+
+async function getRubrics(projectId) {
+  const snapshot = await getDocs(collection(db, "projects", projectId, "rubrics"));
+  return snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => a.name.localeCompare(b.name, "ru"));
+}
+
+async function renderRubricSetup(project, options = {}) {
+  loader();
+  const networks = await getNetworks(project.id);
+  const existing = await getRubrics(project.id);
+  const rows = existing.length
+    ? existing.map((rubric) => ({ id: rubric.id, name: rubric.name, networkIds: [...(rubric.networkIds || [])] }))
+    : [{ id: "", name: "", networkIds: [] }];
+  const removed = new Set();
+
+  const drawRows = () => {
+    const list = document.querySelector("[data-rubric-list]");
+    list.innerHTML = rows.map((row, index) => `
+      <div class="rubric-editor-row" data-rubric-row="${index}">
+        <input data-rubric-name value="${esc(row.name)}" maxlength="70" placeholder="Название рубрики">
+        <div class="checkbox-list">
+          ${networks.map((network) => `<label class="check-pill"><input type="checkbox" value="${network.id}" ${row.networkIds.includes(network.id) ? "checked" : ""}>${esc(network.name)}</label>`).join("")}
+        </div>
+        <button type="button" class="icon-button" data-remove-rubric="${index}" aria-label="Удалить рубрику">×</button>
+      </div>`).join("");
+    list.querySelectorAll("[data-remove-rubric]").forEach((button) => {
+      button.onclick = () => {
+        const index = Number(button.dataset.removeRubric);
+        if (rows[index].id) removed.add(rows[index].id);
+        rows.splice(index, 1);
+        if (!rows.length) rows.push({ id: "", name: "", networkIds: [] });
+        drawRows();
+      };
+    });
+  };
+
+  app.innerHTML = `
+    <section class="screen flow-screen">
+      ${pageTopbar(options.firstRun ? "К проекту" : "Назад")}
+      <div class="flow-card card">
+        <h1>Рубрики</h1>
+        <p class="subtitle">Создайте рубрики и укажите, в каких соцсетях каждая из них используется. Можно выбрать несколько площадок.</p>
+        <form class="form" id="rubrics-form">
+          <div class="rubric-editor-list" data-rubric-list></div>
+          <button type="button" class="button ghost" data-add-rubric>+ Добавить рубрику</button>
+          <div data-message></div>
+          <div class="flow-actions"><span></span><button class="button primary">Сохранить рубрики</button></div>
+        </form>
+      </div>
+    </section>`;
+
+  const goBack = () => options.returnToPlan
+    ? renderPlan(options.returnToPlan.projectId, options.returnToPlan.networkId)
+    : renderNetworkSelection(project);
+  bindTopbar(goBack);
+  drawRows();
+  document.querySelector("[data-add-rubric]").onclick = () => {
+    syncRowsFromDom(rows);
+    rows.push({ id: "", name: "", networkIds: [] });
+    drawRows();
+  };
+
+  document.querySelector("#rubrics-form").onsubmit = async (event) => {
+    event.preventDefault();
+    syncRowsFromDom(rows);
+    try {
+      const validRows = rows.filter((row) => row.name.trim());
+      if (!validRows.length) throw new Error("Добавьте хотя бы одну рубрику.");
+      if (validRows.some((row) => !row.networkIds.length)) throw new Error("Для каждой рубрики выберите хотя бы одну соцсеть.");
+      for (const id of removed) await deleteDoc(doc(db, "projects", project.id, "rubrics", id));
+      for (const row of validRows) {
+        const payload = { name: row.name.trim(), networkIds: row.networkIds, updatedAt: serverTimestamp() };
+        if (row.id) await updateDoc(doc(db, "projects", project.id, "rubrics", row.id), payload);
+        else await addDoc(collection(db, "projects", project.id, "rubrics"), { ...payload, createdAt: serverTimestamp() });
+      }
+      if (options.returnToPlan) renderPlan(options.returnToPlan.projectId, options.returnToPlan.networkId);
+      else renderNetworkSelection(project);
+    } catch (error) {
+      showMessage(readError(error));
+    }
+  };
+}
+
+function syncRowsFromDom(rows) {
+  document.querySelectorAll("[data-rubric-row]").forEach((element) => {
+    const index = Number(element.dataset.rubricRow);
+    rows[index].name = element.querySelector("[data-rubric-name]").value;
+    rows[index].networkIds = [...element.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+  });
+}
+
+async function renderNetworkSettings(project) {
+  loader();
+  const networks = await getNetworks(project.id);
+  app.innerHTML = `
+    <section class="screen flow-screen">
+      ${pageTopbar("К проекту")}
+      <div class="flow-card card narrow">
+        <h1>Соцсети</h1>
+        <p class="subtitle">Добавляйте площадки проекта или удаляйте те, которые больше не используются.</p>
+        <div class="tag-list" data-network-tags>
+          ${networks.map((network) => `<span class="tag">${esc(network.name)} <button class="icon-button" data-delete-network="${network.id}">×</button></span>`).join("") || '<span class="muted">Нет соцсетей</span>'}
+        </div>
+        <form class="form" id="network-settings-form">
+          <label>Новая соцсеть<input name="name" required maxlength="40" placeholder="Название площадки"></label>
+          <button class="button">Добавить</button>
+        </form>
+      </div>
+    </section>`;
+  bindTopbar(() => renderNetworkSelection(project));
+  document.querySelector("#network-settings-form").onsubmit = async (event) => {
+    event.preventDefault();
+    const name = new FormData(event.currentTarget).get("name").trim();
+    await addDoc(collection(db, "projects", project.id, "networks"), { name, createdAt: serverTimestamp() });
+    renderNetworkSettings(project);
+  };
+  document.querySelectorAll("[data-delete-network]").forEach((button) => {
+    button.onclick = async () => {
+      if (!confirm("Удалить эту соцсеть из проекта?")) return;
+      await deleteDoc(doc(db, "projects", project.id, "networks", button.dataset.deleteNetwork));
+      renderNetworkSettings(project);
+    };
+  });
+}
+
+async function renderNetworkSelection(project) {
+  loader();
+  const networks = await getNetworks(project.id);
+  app.innerHTML = `
+    <section class="screen flow-screen">
+      ${pageTopbar("Все проекты")}
+      <div class="network-select-header">
+        <div><h1>${esc(project.name)}</h1><p class="subtitle">Выберите соцсеть, чтобы открыть её контент-план.</p></div>
+        ${project.role === "owner" ? '<div class="plan-tools"><button class="button ghost" data-network-settings>Соцсети</button><button class="button" data-access>Доступ</button></div>' : ""}
+      </div>
+      <div class="network-grid">
+        ${networks.map((network) => `<button class="network-card" data-open-plan="${network.id}"><strong>${esc(network.name)}</strong><span>Открыть контент-план в новой вкладке →</span></button>`).join("") || '<div class="card flow-card"><p>В проекте пока нет соцсетей.</p></div>'}
+      </div>
+    </section>`;
+  bindTopbar(renderDashboard);
+  document.querySelector("[data-network-settings]")?.addEventListener("click", () => renderNetworkSettings(project));
+  document.querySelector("[data-access]")?.addEventListener("click", () => renderAccess(project));
+  document.querySelectorAll("[data-open-plan]").forEach((button) => {
+    button.onclick = () => {
+      const url = new URL(window.location.href);
+      url.search = "";
+      url.searchParams.set("plan", project.id);
+      url.searchParams.set("network", button.dataset.openPlan);
+      window.open(url.toString(), "_blank");
+    };
+  });
+}
+
+/* ---------------- Настройки и доступ ---------------- */
+
+async function renderProjectSettings(project) {
+  app.innerHTML = `
+    <section class="screen flow-screen">
+      ${pageTopbar("На главный экран")}
+      <div class="flow-card card narrow">
+        <h1>Настройки проекта</h1>
+        <form class="form" id="project-settings-form">
+          <label>Название<input name="name" required maxlength="80" value="${esc(project.name)}"></label>
+          <label>О проекте<textarea name="description" maxlength="600">${esc(project.description || "")}</textarea></label>
+          <button class="button primary">Сохранить изменения</button>
+          <div data-message></div>
+        </form>
+        <div class="flow-actions">
+          <button class="button ghost" data-manage-networks>Настроить соцсети</button>
+          <button class="button danger" data-delete-project>Удалить проект</button>
+        </div>
+      </div>
+    </section>`;
+  bindTopbar(renderDashboard);
+  document.querySelector("[data-manage-networks]").onclick = () => renderNetworkSettings(project);
+  document.querySelector("#project-settings-form").onsubmit = async (event) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    await updateDoc(doc(db, "projects", project.id), {
+      name: data.get("name").trim(),
+      description: data.get("description").trim(),
+      updatedAt: serverTimestamp(),
+    });
+    await loadProjects();
+    showMessage("Изменения сохранены.", "success");
+  };
+  document.querySelector("[data-delete-project]").onclick = async () => {
+    if (!confirm(`Удалить проект «${project.name}» вместе со всеми публикациями? Это действие нельзя отменить.`)) return;
+    await deleteProject(project);
+    await loadProjects();
+    renderDashboard();
+  };
+}
+
+async function deleteProject(project) {
+  for (const subcollection of ["networks", "rubrics", "posts", "comments"]) {
+    const snapshot = await getDocs(collection(db, "projects", project.id, subcollection));
+    for (const item of snapshot.docs) await deleteDoc(item.ref);
+  }
+  const members = await getDocs(query(collection(db, "memberships"), where("projectId", "==", project.id)));
+  const ownerMembership = members.docs.find((item) => item.data().userId === user.uid);
+  for (const member of members.docs) {
+    if (member !== ownerMembership) await deleteDoc(member.ref);
+  }
+  if (project.shareCode) await deleteDoc(doc(db, "invitations", project.shareCode));
+  await deleteDoc(doc(db, "projects", project.id));
+  if (ownerMembership) await deleteDoc(ownerMembership.ref);
+}
+
+async function renderAccess(project) {
+  loader();
+  const shareCode = await ensureShareCode(project);
+  const memberSnapshot = await getDocs(query(collection(db, "memberships"), where("projectId", "==", project.id)));
+  const members = memberSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+  app.innerHTML = `
+    <section class="screen flow-screen">
+      ${pageTopbar("К проекту")}
+      <div class="flow-card card">
+        <h1>Доступ</h1>
+        <p class="subtitle">Все участники входят по одному коду и сначала получают роль читателя. После входа вы можете изменить роль каждого человека отдельно.</p>
+        <div class="code-box"><span>Код проекта:</span><span class="code">${esc(shareCode)}</span><button class="button small" data-copy-code>Копировать</button></div>
+        <h2>Участники</h2>
+        <div class="member-list">
+          ${members.map((member) => {
+            const isOwner = member.role === "owner";
+            const name = member.userName || (member.userId === user.uid ? user.displayName : "Участник");
+            const email = member.userEmail || (member.userId === user.uid ? user.email : "");
+            return `<div class="member-row">
+              <div><strong>${esc(name || "Участник")}</strong>${email ? `<div class="member-email">${esc(email)}</div>` : ""}</div>
+              <select data-member-role="${member.id}" ${isOwner ? "disabled" : ""}>
+                ${(isOwner ? ["owner"] : ["viewer", "commenter", "editor"]).map((role) => `<option value="${role}" ${member.role === role ? "selected" : ""}>${roleLabel(role)}</option>`).join("")}
+              </select>
+            </div>`;
+          }).join("")}
+        </div>
+        <div data-message></div>
+      </div>
+    </section>`;
+  bindTopbar(() => renderNetworkSelection(project));
+  document.querySelector("[data-copy-code]").onclick = async (event) => {
+    await navigator.clipboard.writeText(shareCode);
+    event.currentTarget.textContent = "Скопировано";
+  };
+  document.querySelectorAll("[data-member-role]").forEach((select) => {
+    select.onchange = async () => {
+      try {
+        await updateDoc(doc(db, "memberships", select.dataset.memberRole), { role: select.value });
+        showMessage("Роль участника обновлена.", "success");
+      } catch (error) {
+        showMessage(readError(error));
+      }
+    };
+  });
+}
+
+async function ensureShareCode(project) {
+  let code = project.shareCode;
+  if (!code) {
+    code = await uniqueCode();
+    await updateDoc(doc(db, "projects", project.id), { shareCode: code, updatedAt: serverTimestamp() });
+    project.shareCode = code;
+  }
+  await setDoc(doc(db, "invitations", code), {
+    projectId: project.id,
+    role: "viewer",
+    active: true,
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+  return code;
+}
+
+/* ---------------- Контент-план ---------------- */
+
+async function renderPlan(projectId, networkId) {
+  loader("Открываю контент-план…");
+  const membershipDoc = await getDoc(doc(db, "memberships", `${projectId}_${user.uid}`));
+  if (!membershipDoc.exists()) {
+    app.innerHTML = '<div class="loader"><div><h2>Нет доступа</h2><p>Вернитесь на главный экран и введите код проекта.</p></div></div>';
+    return;
+  }
+  const [projectDoc, networkDoc] = await Promise.all([
+    getDoc(doc(db, "projects", projectId)),
+    getDoc(doc(db, "projects", projectId, "networks", networkId)),
+  ]);
+  if (!projectDoc.exists() || !networkDoc.exists()) {
+    app.innerHTML = '<div class="loader"><div><h2>Контент-план не найден</h2></div></div>';
+    return;
+  }
+  const project = { id: projectDoc.id, ...projectDoc.data(), role: membershipDoc.data().role };
+  const network = { id: networkDoc.id, ...networkDoc.data() };
+  const allRubrics = await getRubrics(projectId);
+  const rubrics = allRubrics.filter((rubric) => (rubric.networkIds || []).includes(networkId));
+  const postsSnapshot = await getDocs(collection(db, "projects", projectId, "posts"));
+  const posts = postsSnapshot.docs
+    .map((item) => ({ id: item.id, ...item.data() }))
+    .filter((post) => post.networkId === networkId);
+
+  drawPlan(project, network, rubrics, posts);
+}
+
+function drawPlan(project, network, rubrics, posts) {
+  const baseStart = project.planStartDate || todayIso();
+  const start = addDays(baseStart, planOffset);
+  const dates = Array.from({ length: 10 }, (_, index) => addDays(start, index));
+  const columns = Array.from({ length: Math.max(10, rubrics.length) }, (_, index) => rubrics[index] || null);
+  const postMap = new Map(posts.map((post) => [`${post.date}|${post.rubricId}`, post]));
+
+  app.innerHTML = `
+    <section class="plan-screen">
+      <div class="page-topbar compact"><button class="back-button" data-close-tab>← Закрыть вкладку</button>${accountMarkup()}</div>
+      <div class="plan-header">
+        <div><h1>${esc(project.name)} — ${esc(network.name)}</h1><p class="subtitle">Нажмите на ячейку, чтобы создать или открыть публикацию.</p></div>
+        <div class="plan-tools">
+          ${canEdit(project.role) ? '<button class="button" data-edit-rubrics>Редактировать рубрики</button>' : ""}
+          <button class="button ghost small" data-prev-dates>−10 дней</button>
+          <button class="button ghost small" data-next-dates>+10 дней</button>
+          <button class="button ghost small" data-zoom-out>−</button>
+          <span class="zoom-value">${Math.round(planZoom * 100)}%</span>
+          <button class="button ghost small" data-zoom-in>+</button>
+        </div>
+      </div>
+      <div class="grid-scroll">
+        <table class="content-grid" style="--cell-height:${Math.round(50 * planZoom)}px;--header-height:${Math.round(44 * planZoom)}px;--grid-font:${(0.92 * planZoom).toFixed(2)}rem;width:${Math.round(planZoom * 100)}%;min-width:${Math.round(1050 * planZoom)}px">
+          <thead><tr><th class="date-column">Дата</th>${columns.map((rubric) => `<th>${rubric ? esc(rubric.name) : ""}</th>`).join("")}</tr></thead>
+          <tbody>
+            ${dates.map((date) => `<tr>
+              <td class="date-column">${formatDate(date)}</td>
+              ${columns.map((rubric) => {
+                if (!rubric) return '<td class="post-cell"></td>';
+                const post = postMap.get(`${date}|${rubric.id}`);
+                const clickable = post || canEdit(project.role);
+                return `<td class="post-cell real" ${clickable ? `data-post-cell data-date="${date}" data-rubric="${rubric.id}" data-post="${post?.id || ""}"` : ""}>
+                  ${post ? `<span class="post-title">${esc(post.title)}</span><i class="post-status-dot" title="${esc(post.status || "Идея")}"></i>` : ""}
+                </td>`;
+              }).join("")}
+            </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </section>`;
+
+  bindAccountMenu();
+  document.querySelector("[data-close-tab]").onclick = () => window.close();
+  document.querySelector("[data-edit-rubrics]")?.addEventListener("click", () => {
+    renderRubricSetup(project, { returnToPlan: { projectId: project.id, networkId: network.id } });
+  });
+  document.querySelector("[data-prev-dates]").onclick = () => { planOffset -= 10; renderPlan(project.id, network.id); };
+  document.querySelector("[data-next-dates]").onclick = () => { planOffset += 10; renderPlan(project.id, network.id); };
+  document.querySelector("[data-zoom-out]").onclick = () => { planZoom = Math.max(0.8, planZoom - 0.1); drawPlan(project, network, rubrics, posts); };
+  document.querySelector("[data-zoom-in]").onclick = () => { planZoom = Math.min(1.4, planZoom + 0.1); drawPlan(project, network, rubrics, posts); };
+  document.querySelectorAll("[data-post-cell]").forEach((cell) => {
+    cell.onclick = () => {
+      const post = posts.find((item) => item.id === cell.dataset.post) || null;
+      const rubric = rubrics.find((item) => item.id === cell.dataset.rubric);
+      openPostEditor({ project, network, rubric, date: cell.dataset.date, post });
+    };
+  });
+}
+
+async function openPostEditor({ project, network, rubric, date, post }) {
+  const editable = canEdit(project.role);
+  const commentable = canComment(project.role);
+  let comments = [];
+  if (post) {
+    const snapshot = await getDocs(query(collection(db, "projects", project.id, "comments"), where("postId", "==", post.id)));
+    comments = snapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+  }
+  const disabled = editable ? "" : "disabled";
+  const field = (label, name, value = "", tag = "textarea", extra = "") => `
+    <label>${label}${tag === "input"
+      ? `<input name="${name}" value="${esc(value)}" ${extra} ${disabled}>`
+      : `<textarea name="${name}" ${disabled}>${esc(value)}</textarea>`}
+    </label>`;
+
+  const modal = openModal(
+    post ? "Публикация" : "Новая публикация",
+    `<form class="form" id="post-form">
+      <div class="form-row">
+        <label>Дата<input value="${formatDate(date)}" disabled></label>
+        <label>Рубрика<input value="${esc(rubric.name)}" disabled></label>
+      </div>
+      <div class="post-editor-grid">
+        <section class="editor-column">
+          <h3>Задача и материалы</h3>
+          ${field("Название поста", "title", post?.title, "input", "required maxlength=120")}
+          ${field("Суть поста", "idea", post?.idea)}
+          ${field("Польза для пользователя", "benefit", post?.benefit)}
+          ${field("Формат", "format", post?.format)}
+          ${field("Референсы и скрины", "reference", post?.reference)}
+        </section>
+        <section class="editor-column">
+          <h3>Готовый материал</h3>
+          ${field("Подводка / готовый текст", "caption", post?.caption)}
+          ${field("Визуал", "visual", post?.visual)}
+          <label>Статус<select name="status" ${disabled}>${POST_STATUSES.map((status) => `<option ${post?.status === status ? "selected" : ""}>${status}</option>`).join("")}</select></label>
+        </section>
+      </div>
+      ${editable ? `<div class="flow-actions">${post ? '<button type="button" class="button danger" data-delete-post>Удалить</button>' : "<span></span>"}<button class="button primary">Сохранить</button></div>` : ""}
+      <div data-message></div>
+    </form>
+    <section class="comments">
+      <h3>Комментарии</h3>
+      <div>${comments.map((comment) => `<div class="comment"><small>${esc(comment.authorName || "Участник")}</small>${esc(comment.text)}</div>`).join("") || '<p class="muted">Комментариев пока нет.</p>'}</div>
+      ${commentable && post ? '<form class="form" id="comment-form"><label>Новый комментарий<textarea name="text" required></textarea></label><button class="button small">Отправить</button></form>' : ""}
+      ${commentable && !post ? '<p class="muted">Сначала сохраните публикацию — после этого можно будет оставить комментарий.</p>' : ""}
+    </section>`,
+  );
+
+  const form = modal.querySelector("#post-form");
+  if (editable) {
+    form.onsubmit = async (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const payload = {
+        networkId: network.id,
+        networkName: network.name,
+        rubricId: rubric.id,
+        rubricName: rubric.name,
+        date,
+        title: data.get("title").trim(),
+        idea: data.get("idea").trim(),
+        benefit: data.get("benefit").trim(),
+        format: data.get("format").trim(),
+        reference: data.get("reference").trim(),
+        caption: data.get("caption").trim(),
+        visual: data.get("visual").trim(),
+        status: data.get("status"),
+        updatedAt: serverTimestamp(),
+      };
+      try {
+        if (post) await updateDoc(doc(db, "projects", project.id, "posts", post.id), payload);
+        else await addDoc(collection(db, "projects", project.id, "posts"), { ...payload, createdAt: serverTimestamp(), authorId: user.uid });
+        modal.remove();
+        renderPlan(project.id, network.id);
+      } catch (error) {
+        showMessage(readError(error), "error", modal);
+      }
+    };
+    modal.querySelector("[data-delete-post]")?.addEventListener("click", async () => {
+      if (!confirm("Удалить эту публикацию?")) return;
+      await deleteDoc(doc(db, "projects", project.id, "posts", post.id));
+      modal.remove();
+      renderPlan(project.id, network.id);
+    });
+  }
+  modal.querySelector("#comment-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const text = new FormData(event.currentTarget).get("text").trim();
+    await addDoc(collection(db, "projects", project.id, "comments"), {
+      postId: post.id,
+      authorId: user.uid,
+      authorName: user.displayName || "Участник",
+      text,
+      createdAt: serverTimestamp(),
+    });
+    modal.remove();
+    openPostEditor({ project, network, rubric, date, post });
+  });
+}
+
+/* ---------------- Запуск ---------------- */
+
+onAuthStateChanged(auth, async (nextUser) => {
+  user = nextUser;
+  if (!user) {
+    renderAuth();
+    return;
+  }
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const planProjectId = params.get("plan");
+    const planNetworkId = params.get("network");
+    if (planProjectId && planNetworkId) await renderPlan(planProjectId, planNetworkId);
+    else {
+      await loadProjects();
+      renderDashboard();
+    }
+  } catch (error) {
+    app.innerHTML = `<div class="loader"><div><h2>Не удалось открыть страницу</h2><p class="error">${esc(readError(error))}</p><button class="button" onclick="location.reload()">Обновить</button></div></div>`;
+  }
+});

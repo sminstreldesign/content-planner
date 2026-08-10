@@ -44,7 +44,10 @@ service cloud.firestore {
     match /invitations/{code} {
       allow get: if signedIn();
       allow list: if false;
-      allow create, update, delete: if signedIn() && isOwner(request.resource.data.projectId);
+      allow create: if signedIn() && isOwner(request.resource.data.projectId);
+      allow update: if signedIn() && isOwner(resource.data.projectId)
+        && request.resource.data.projectId == resource.data.projectId;
+      allow delete: if signedIn() && isOwner(resource.data.projectId);
     }
     match /memberships/{membershipId} {
       allow read: if signedIn() && (resource.data.userId == request.auth.uid || isOwner(resource.data.projectId));
@@ -52,11 +55,21 @@ service cloud.firestore {
         (request.resource.data.userId == request.auth.uid &&
          get(/databases/$(database)/documents/invitations/$(request.resource.data.inviteCode)).data.active == true &&
          get(/databases/$(database)/documents/invitations/$(request.resource.data.inviteCode)).data.projectId == request.resource.data.projectId &&
-         get(/databases/$(database)/documents/invitations/$(request.resource.data.inviteCode)).data.role == request.resource.data.role)
+         request.resource.data.role == 'viewer')
         || isOwner(request.resource.data.projectId)
         || (request.resource.data.userId == request.auth.uid && createdProjectOwner(request.resource.data.projectId))
       );
-      allow update, delete: if signedIn() && isOwner(resource.data.projectId);
+      allow update: if signedIn()
+        && isOwner(resource.data.projectId)
+        && resource.data.role != 'owner'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
+        && request.resource.data.role in ['viewer', 'commenter', 'editor'];
+      allow delete: if signedIn() && (
+        (isOwner(resource.data.projectId) && resource.data.role != 'owner')
+        || (resource.data.role == 'owner'
+          && resource.data.userId == request.auth.uid
+          && !exists(/databases/$(database)/documents/projects/$(resource.data.projectId)))
+      );
     }
   }
 }
