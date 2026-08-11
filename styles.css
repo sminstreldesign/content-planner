@@ -280,6 +280,90 @@ textarea { min-height: 105px; resize: vertical; }
 .save-progress small { font-size: .82rem; }
 .loader { display: grid; min-height: 100vh; padding: 30px; place-items: center; text-align: center; }
 
+/* Страница 404 */
+.not-found-page { min-height: 100vh; overflow-x: hidden; }
+.not-found {
+  display: grid;
+  width: min(100%, 1040px);
+  min-height: 100vh;
+  margin: 0 auto;
+  place-content: center;
+  justify-items: center;
+  padding: clamp(24px, 5vw, 56px);
+  text-align: center;
+}
+.not-found-scene { width: min(100%, 900px); margin-bottom: clamp(2px, 1vw, 12px); }
+.not-found-illustration { display: block; width: 100%; height: auto; overflow: visible; }
+.error-digit {
+  fill: var(--primary);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 390px;
+  font-weight: 400;
+  opacity: .96;
+}
+.error-zero { fill: none; stroke: var(--primary); stroke-width: 45; }
+.error-zero-highlight { fill: none; stroke: rgba(var(--surface-rgb), .28); stroke-width: 3; }
+.error-squiggle { fill: none; stroke: rgba(var(--secondary-rgb), .34); stroke-linecap: round; stroke-width: 8; }
+.error-dot { fill: var(--accent); opacity: .72; }
+.error-dot-one { animation: error-dot-drift 3.8s ease-in-out infinite; }
+.error-dot-two { animation: error-dot-drift 4.3s .7s ease-in-out infinite reverse; }
+.olive-shadow { fill: rgba(var(--text-rgb), .13); }
+.olive-body, .tiny-olive-body { fill: var(--secondary); stroke: var(--primary); stroke-linejoin: round; stroke-width: 7; }
+.olive-shine, .tiny-olive-shine { fill: rgba(var(--surface-rgb), .35); }
+.olive-opening { fill: var(--primary); }
+.olive-pimento { fill: var(--accent); }
+.olive-eye, .tiny-eye { fill: var(--text); }
+.olive-eye-glint { fill: var(--surface); }
+.olive-brow, .tiny-brow, .olive-mouth, .tiny-mouth,
+.olive-arm path, .olive-leg path, .tiny-arm path, .tiny-leg path {
+  fill: none;
+  stroke: var(--text);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.olive-brow, .tiny-brow { stroke-width: 5; }
+.olive-mouth, .tiny-mouth { stroke-width: 6; }
+.olive-arm path, .olive-leg path { stroke-width: 6; }
+.tiny-arm path, .tiny-leg path { stroke-width: 5; }
+.olive-arm, .olive-leg, .tiny-arm, .tiny-leg { transform-box: view-box; }
+.olive-arm-left { transform-origin: 194px 227px; animation: six-seven-left 1.15s cubic-bezier(.45, 0, .55, 1) infinite; }
+.olive-arm-right { transform-origin: 292px 227px; animation: six-seven-right 1.15s cubic-bezier(.45, 0, .55, 1) infinite; }
+.meme-number { fill: var(--accent); font-family: Georgia, "Times New Roman", serif; font-size: 44px; font-weight: 700; }
+.meme-number-six { animation: meme-number-six 1.15s ease-in-out infinite; }
+.meme-number-seven { animation: meme-number-seven 1.15s ease-in-out infinite; }
+.olive-leg-left { transform-origin: 220px 323px; animation: worried-foot-left .75s ease-in-out infinite; }
+.olive-leg-right { transform-origin: 267px 323px; animation: worried-foot-right .75s ease-in-out infinite; }
+.olive-in-zero { animation: olive-peek 5.2s cubic-bezier(.55, .04, .25, 1) infinite; }
+.tiny-arm-left { transform-origin: 414px 218px; animation: tiny-arm-left .48s ease-in-out infinite; }
+.tiny-arm-right { transform-origin: 496px 218px; animation: tiny-arm-right .48s ease-in-out infinite; }
+.tiny-leg-left { transform-origin: 435px 292px; animation: tiny-leg-left .4s ease-in-out infinite; }
+.tiny-leg-right { transform-origin: 475px 292px; animation: tiny-leg-right .4s ease-in-out infinite; }
+.not-found-title { margin: 0 0 22px; font-size: clamp(1.75rem, 4vw, 3rem); line-height: 1.1; }
+.not-found-retry { min-width: 210px; text-decoration: none; box-shadow: 0 10px 24px rgba(var(--primary-rgb), .2); }
+
+@keyframes six-seven-left {
+  0%, 100% { transform: rotate(-12deg) translateY(11px); }
+  50% { transform: rotate(8deg) translateY(-12px); }
+}
+@keyframes six-seven-right {
+  0%, 100% { transform: rotate(-8deg) translateY(-12px); }
+  50% { transform: rotate(12deg) translateY(11px); }
+}
+@keyframes meme-number-six { 0%, 100% { opacity: .35; transform: translateY(8px); } 50% { opacity: 1; transform: translateY(-5px); } }
+@keyframes meme-number-seven { 0%, 100% { opacity: 1; transform: translateY(-5px); } 50% { opacity: .35; transform: translateY(8px); } }
+@keyframes worried-foot-left { 0%, 100% { transform: rotate(7deg); } 50% { transform: rotate(-9deg); } }
+@keyframes worried-foot-right { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(9deg); } }
+@keyframes olive-peek {
+  0%, 9%, 100% { transform: translateY(176px); }
+  30%, 72% { transform: translateY(0); }
+  82% { transform: translateY(20px); }
+}
+@keyframes tiny-arm-left { 0%, 100% { transform: rotate(-12deg); } 50% { transform: rotate(18deg); } }
+@keyframes tiny-arm-right { 0%, 100% { transform: rotate(12deg); } 50% { transform: rotate(-18deg); } }
+@keyframes tiny-leg-left { 0%, 100% { transform: rotate(14deg); } 50% { transform: rotate(-16deg); } }
+@keyframes tiny-leg-right { 0%, 100% { transform: rotate(-14deg); } 50% { transform: rotate(16deg); } }
+@keyframes error-dot-drift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
+
 .verification-card { max-width: 680px; }
 .verification-icon { display: grid; width: 58px; height: 58px; margin: 0 auto 18px; place-items: center; border-radius: 18px; background: var(--primary); color: var(--surface); font-size: 1.65rem; font-weight: 700; }
 .verification-steps { display: grid; grid-template-columns: 30px 1fr; gap: 10px 12px; margin: 24px 0; text-align: left; }
@@ -292,6 +376,8 @@ textarea { min-height: 105px; resize: vertical; }
 @media (prefers-reduced-motion: reduce) {
   .page-loader-spinner, .button-spinner, .page-loader-track i { animation-duration: 2s; }
   .button, .rubric-editor-row, .save-progress-track i { transition: none; }
+  .not-found-illustration * { animation: none !important; }
+  .olive-in-zero { transform: translateY(0); }
 }
 
 @media (max-width: 820px) {
@@ -314,4 +400,7 @@ textarea { min-height: 105px; resize: vertical; }
   .plan-screen { padding: 12px; }
   .plan-header { grid-template-columns: 1fr; }
   .post-form-toolbar { align-items: stretch; flex-direction: column; }
+  .not-found { padding: 20px 14px 30px; }
+  .not-found-scene { width: 100%; }
+  .not-found-title { margin-top: -4px; }
 }
