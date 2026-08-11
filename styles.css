@@ -213,7 +213,9 @@ textarea { min-height: 105px; resize: vertical; }
 .code-box { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 20px 0 28px; padding: 17px; border-radius: 17px; background: rgba(var(--accent-rgb), .22); }
 .code { font-size: 1.3rem; font-weight: 700; letter-spacing: 0.15em; }
 .member-list { display: grid; gap: 9px; }
-.member-row { display: grid; grid-template-columns: minmax(0,1fr) 180px; gap: 14px; align-items: center; padding: 13px; border-bottom: 1px solid var(--line); }
+.member-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(280px, auto); gap: 14px; align-items: center; padding: 13px; border-bottom: 1px solid var(--line); }
+.member-actions { display: flex; justify-content: flex-end; align-items: center; gap: 9px; flex-wrap: wrap; }
+.member-actions select { min-width: 150px; }
 .member-email { font-size: 0.86rem; opacity: 0.68; }
 
 /* Контент-план */

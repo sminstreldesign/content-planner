@@ -23,23 +23,24 @@ service cloud.firestore {
     }
     match /projects/{projectId} {
       allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
-      allow read: if hasRole(projectId, ['owner','editor','commenter','viewer']);
+      // commenter is a legacy value with viewer-only access until the owner opens the access screen.
+      allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
       allow update, delete: if isOwner(projectId);
 
       match /networks/{networkId} {
-        allow read: if hasRole(projectId, ['owner','editor','commenter','viewer']);
+        allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
         allow create, update, delete: if hasRole(projectId, ['owner','editor']);
       }
       match /rubrics/{rubricId} {
-        allow read: if hasRole(projectId, ['owner','editor','commenter','viewer']);
+        allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
         allow create, update, delete: if hasRole(projectId, ['owner','editor']);
       }
       match /posts/{postId} {
-        allow read: if hasRole(projectId, ['owner','editor','commenter','viewer']);
+        allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
         allow create, update, delete: if hasRole(projectId, ['owner','editor']);
       }
       match /postImages/{imageId} {
-        allow read: if hasRole(projectId, ['owner','editor','commenter','viewer']);
+        allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
         allow create: if hasRole(projectId, ['owner','editor'])
           && request.resource.data.keys().hasOnly(['postId', 'kind', 'dataUrl', 'authorId', 'createdAt'])
           && request.resource.data.postId is string
@@ -52,9 +53,9 @@ service cloud.firestore {
         allow delete: if hasRole(projectId, ['owner','editor']);
       }
       match /comments/{commentId} {
-        allow read: if hasRole(projectId, ['owner','editor','commenter','viewer']);
-        allow create: if hasRole(projectId, ['owner','editor','commenter']) && request.resource.data.authorId == request.auth.uid;
-        allow update, delete: if isOwner(projectId) || (hasRole(projectId, ['commenter']) && resource.data.authorId == request.auth.uid);
+        allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
+        allow create: if hasRole(projectId, ['owner','editor']) && request.resource.data.authorId == request.auth.uid;
+        allow update, delete: if isOwner(projectId);
       }
     }
     match /invitations/{code} {
@@ -79,7 +80,7 @@ service cloud.firestore {
         && isOwner(resource.data.projectId)
         && resource.data.role != 'owner'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
-        && request.resource.data.role in ['viewer', 'commenter', 'editor'];
+        && request.resource.data.role in ['viewer', 'editor'];
       allow delete: if signedIn() && (
         (isOwner(resource.data.projectId) && resource.data.role != 'owner')
         || (resource.data.role == 'owner'

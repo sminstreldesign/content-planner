@@ -41,7 +41,6 @@ const app = document.querySelector("#app");
 const ROLE_LABELS = {
   owner: "Владелец",
   editor: "Редактор",
-  commenter: "Комментатор",
   viewer: "Читатель",
 };
 const POST_STATUSES = ["Идея", "В работе", "На согласовании", "Готово", "Опубликовано"];
@@ -77,9 +76,10 @@ const initials = () => {
     .join("");
 };
 
-const roleLabel = (role) => ROLE_LABELS[role] || role;
+const normalizeRole = (role) => role === "commenter" ? "viewer" : role;
+const roleLabel = (role) => ROLE_LABELS[normalizeRole(role)] || role;
 const canEdit = (role) => ["owner", "editor"].includes(role);
-const canComment = (role) => ["owner", "editor", "commenter"].includes(role);
+const canComment = (role) => ["owner", "editor"].includes(role);
 const statusClass = (status) => STATUS_CLASSES[status] || STATUS_CLASSES.Идея;
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
@@ -437,7 +437,7 @@ async function loadProjects() {
   for (const membershipDoc of membershipSnapshot.docs) {
     const membership = membershipDoc.data();
     const projectDoc = await getDoc(doc(db, "projects", membership.projectId));
-    if (projectDoc.exists()) loaded.push({ id: projectDoc.id, ...projectDoc.data(), role: membership.role });
+    if (projectDoc.exists()) loaded.push({ id: projectDoc.id, ...projectDoc.data(), role: normalizeRole(membership.role) });
   }
   projects = loaded.sort((a, b) => (a.name || "").localeCompare(b.name || "", "ru"));
   return projects;
@@ -1142,7 +1142,17 @@ async function renderAccess(project) {
   loader();
   const shareCode = await ensureShareCode(project);
   const memberSnapshot = await getDocs(query(collection(db, "memberships"), where("projectId", "==", project.id)));
-  const members = memberSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+  const legacyCommenters = memberSnapshot.docs.filter((item) => item.data().role === "commenter");
+  if (legacyCommenters.length) {
+    const batch = writeBatch(db);
+    legacyCommenters.forEach((item) => batch.update(item.ref, { role: "viewer" }));
+    await batch.commit();
+  }
+  const members = memberSnapshot.docs.map((item) => ({
+    id: item.id,
+    ...item.data(),
+    role: normalizeRole(item.data().role),
+  }));
   app.innerHTML = `
     <section class="screen flow-screen">
       ${pageTopbar("К проекту")}
@@ -1158,9 +1168,12 @@ async function renderAccess(project) {
             const email = member.userEmail || (member.userId === user.uid ? user.email : "");
             return `<div class="member-row">
               <div><strong>${esc(name || "Участник")}</strong>${email ? `<div class="member-email">${esc(email)}</div>` : ""}</div>
-              <select data-member-role="${member.id}" ${isOwner ? "disabled" : ""}>
-                ${(isOwner ? ["owner"] : ["viewer", "commenter", "editor"]).map((role) => `<option value="${role}" ${member.role === role ? "selected" : ""}>${roleLabel(role)}</option>`).join("")}
-              </select>
+              <div class="member-actions">
+                <select data-member-role="${esc(member.id)}" ${isOwner ? "disabled" : ""}>
+                  ${(isOwner ? ["owner"] : ["viewer", "editor"]).map((role) => `<option value="${role}" ${member.role === role ? "selected" : ""}>${roleLabel(role)}</option>`).join("")}
+                </select>
+                ${isOwner ? "" : `<button class="button small danger" type="button" data-remove-member="${esc(member.id)}" data-member-name="${esc(name || "Участник")}">Удалить</button>`}
+              </div>
             </div>`;
           }).join("")}
         </div>
@@ -1178,6 +1191,21 @@ async function renderAccess(project) {
         await updateDoc(doc(db, "memberships", select.dataset.memberRole), { role: select.value });
         showMessage("Роль участника обновлена.", "success");
       } catch (error) {
+        showMessage(readError(error));
+      }
+    };
+  });
+  document.querySelectorAll("[data-remove-member]").forEach((button) => {
+    button.onclick = async () => {
+      const memberName = button.dataset.memberName;
+      if (!confirm(`Удалить участника «${memberName}» из проекта?`)) return;
+      button.disabled = true;
+      try {
+        await deleteDoc(doc(db, "memberships", button.dataset.removeMember));
+        button.closest(".member-row")?.remove();
+        showMessage("Участник удалён из проекта.", "success");
+      } catch (error) {
+        button.disabled = false;
         showMessage(readError(error));
       }
     };
@@ -1217,7 +1245,7 @@ async function renderPlan(projectId, networkId) {
     app.innerHTML = '<div class="loader"><div><h2>Контент-план не найден</h2></div></div>';
     return;
   }
-  const project = { id: projectDoc.id, ...projectDoc.data(), role: membershipDoc.data().role };
+  const project = { id: projectDoc.id, ...projectDoc.data(), role: normalizeRole(membershipDoc.data().role) };
   const network = { id: networkDoc.id, ...networkDoc.data() };
   const allRubrics = await getRubrics(projectId);
   const rubrics = allRubrics.filter((rubric) => rubricAppliesToNetwork(rubric, networkId));
