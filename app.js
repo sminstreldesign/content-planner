@@ -6,6 +6,7 @@ import {
   signOut,
   updateProfile,
   onAuthStateChanged,
+  sendEmailVerification,
 } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import {
   getFirestore,
@@ -33,6 +34,7 @@ const firebaseConfig = {
 
 const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
+auth.languageCode = "ru";
 const db = getFirestore(firebaseApp);
 const app = document.querySelector("#app");
 
@@ -106,7 +108,11 @@ function formatDate(iso) {
 function readError(error) {
   return ({
     "auth/email-already-in-use": "Этот email уже зарегистрирован. Войдите в аккаунт.",
+    "auth/invalid-email": "Проверьте формат email.",
     "auth/invalid-credential": "Неверный email или пароль.",
+    "auth/network-request-failed": "Не удалось подключиться к серверу. Проверьте интернет и повторите попытку.",
+    "auth/too-many-requests": "Слишком много попыток. Подождите немного и повторите действие.",
+    "auth/user-disabled": "Этот аккаунт отключён.",
     "auth/weak-password": "Пароль должен содержать минимум 6 символов.",
     "permission-denied": "Нет доступа к этому действию.",
   })[error?.code] || error?.message || "Что-то пошло не так. Попробуйте ещё раз.";
@@ -118,7 +124,117 @@ function showMessage(message, type = "error", root = document) {
 }
 
 function loader(label = "Загружаю…") {
-  app.innerHTML = `<div class="loader">${esc(label)}</div>`;
+  const current = app.querySelector("[data-page-loader]");
+  if (current) {
+    current.querySelector("[data-loader-label]").textContent = label;
+    return;
+  }
+  app.setAttribute("aria-busy", "true");
+  app.insertAdjacentHTML(
+    "afterbegin",
+    `<div class="page-loader" data-page-loader role="status" aria-live="polite">
+      <span class="page-loader-spinner" aria-hidden="true"></span>
+      <span data-loader-label>${esc(label)}</span>
+      <span class="page-loader-track" aria-hidden="true"><i></i></span>
+    </div>`,
+  );
+}
+
+new MutationObserver(() => {
+  if (!app.querySelector("[data-page-loader]")) app.removeAttribute("aria-busy");
+}).observe(app, { childList: true, subtree: false });
+
+function beginFormProgress(form, label, totalSteps = 1) {
+  if (form.dataset.submitting === "true") return null;
+  const button = form.querySelector('button:not([type="button"])');
+  if (!button) return null;
+  form.dataset.submitting = "true";
+  form.setAttribute("aria-busy", "true");
+  button.disabled = true;
+  const originalLabel = button.textContent;
+  button.innerHTML = `<span class="button-spinner" aria-hidden="true"></span>${esc(label)}`;
+  const progress = document.createElement("div");
+  progress.className = "save-progress";
+  progress.dataset.saveProgress = "";
+  progress.setAttribute("role", "status");
+  progress.setAttribute("aria-live", "polite");
+  progress.innerHTML = `<span class="save-progress-track" aria-hidden="true"><i></i></span><small data-progress-label>${esc(label)}</small>`;
+  const message = form.querySelector("[data-message]");
+  if (message) message.before(progress);
+  else form.append(progress);
+  const total = Math.max(1, totalSteps);
+  let completed = 0;
+
+  return {
+    advance(nextLabel = label) {
+      completed += 1;
+      progress.querySelector("i").style.width = `${Math.min(100, Math.round((completed / total) * 100))}%`;
+      progress.querySelector("[data-progress-label]").textContent = nextLabel;
+    },
+    finish() {
+      delete form.dataset.submitting;
+      form.removeAttribute("aria-busy");
+      button.disabled = false;
+      button.textContent = originalLabel;
+      progress.remove();
+    },
+  };
+}
+
+function rubricNetworkIds(rubric, networks) {
+  const available = new Set(networks.map((network) => network.id));
+  if (!Array.isArray(rubric.networkIds)) return networks.map((network) => network.id);
+  return rubric.networkIds.filter((networkId) => available.has(networkId));
+}
+
+function rubricAppliesToNetwork(rubric, networkId) {
+  return !Array.isArray(rubric.networkIds) || rubric.networkIds.includes(networkId);
+}
+
+function refreshRubricValidation(rowSelector, revealAll = false) {
+  const elements = [...document.querySelectorAll(rowSelector)];
+  const nameCounts = new Map();
+  elements.forEach((element) => {
+    const key = element.querySelector("[data-rubric-name]").value.trim().toLocaleLowerCase("ru-RU");
+    if (key) nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
+  });
+
+  let firstInvalid = null;
+  elements.forEach((element) => {
+    const nameInput = element.querySelector("[data-rubric-name]");
+    const checkboxList = element.querySelector(".checkbox-list");
+    const hint = element.querySelector("[data-rubric-hint]");
+    const name = nameInput.value.trim();
+    const missingName = !name;
+    const missingNetwork = !checkboxList.querySelector('input[type="checkbox"]:checked');
+    const duplicateName = Boolean(name) && nameCounts.get(name.toLocaleLowerCase("ru-RU")) > 1;
+    const errors = [];
+    if (missingName && revealAll) errors.push("Введите название рубрики.");
+    if (missingNetwork) errors.push("Выберите хотя бы одну соцсеть.");
+    if (duplicateName) errors.push("Название рубрики повторяется.");
+    const invalid = missingName || missingNetwork || duplicateName;
+    const visibleInvalid = errors.length > 0;
+    element.classList.toggle("rubric-editor-row-invalid", visibleInvalid);
+    nameInput.setAttribute("aria-invalid", String(missingName || duplicateName));
+    checkboxList.setAttribute("aria-invalid", String(missingNetwork));
+    hint.hidden = !visibleInvalid;
+    hint.textContent = errors.join(" ");
+    if (invalid && !firstInvalid) firstInvalid = missingName ? nameInput : (checkboxList.querySelector('input[type="checkbox"]') || checkboxList);
+  });
+  return { valid: !firstInvalid, firstInvalid };
+}
+
+function bindRubricValidation(rowSelector) {
+  document.querySelectorAll(rowSelector).forEach((element) => {
+    element.addEventListener("input", () => refreshRubricValidation(rowSelector));
+    element.addEventListener("change", () => refreshRubricValidation(rowSelector));
+  });
+  refreshRubricValidation(rowSelector);
+}
+
+function focusFirstRubricError(validation) {
+  validation.firstInvalid?.scrollIntoView({ behavior: "smooth", block: "center" });
+  validation.firstInvalid?.focus?.({ preventScroll: true });
 }
 
 function accountMarkup({ showHome = true } = {}) {
@@ -126,7 +242,7 @@ function accountMarkup({ showHome = true } = {}) {
     <div class="account-wrap">
       <button class="account-button" data-account aria-label="Открыть меню аккаунта">${esc(initials())}</button>
       <div class="account-menu hidden" data-account-menu>
-        <div class="account-name"><strong>${esc(user?.displayName || "Аккаунт")}</strong><br><small>${esc(user?.email || "")}</small></div>
+        <div class="account-name"><strong>${esc(user?.displayName || "Аккаунт")}</strong><br><small>${esc(user?.email || "")}</small>${user?.emailVerified ? '<span class="verified-email">✓ Email подтверждён</span>' : ""}</div>
         ${showHome ? "<button data-go-home>Выйти на главный экран</button>" : ""}
         <button data-signout>Выйти из аккаунта</button>
       </div>
@@ -211,7 +327,7 @@ function renderAuth(mode = "welcome") {
     <form class="form" id="auth-form">
       ${isRegister ? '<label>Имя<input name="name" required maxlength="60" autocomplete="name"></label>' : ""}
       <label>Email<input name="email" type="email" required autocomplete="email"></label>
-      <label>Пароль<input name="password" type="password" required minlength="6" autocomplete="current-password"></label>
+      <label>Пароль<input name="password" type="password" required minlength="6" autocomplete="${isRegister ? "new-password" : "current-password"}"></label>
       <button class="button primary">${isRegister ? "Создать аккаунт" : "Войти"}</button>
       <button type="button" class="link-button" data-auth-back>Назад</button>
     </form>
@@ -228,9 +344,12 @@ function renderAuth(mode = "welcome") {
   authForm.onsubmit = async (event) => {
     event.preventDefault();
     const data = new FormData(authForm);
+    const progress = beginFormProgress(authForm, isRegister ? "Создаю аккаунт…" : "Вхожу…", isRegister ? 3 : 1);
+    if (!progress) return;
     try {
       if (isRegister) {
         const credential = await createUserWithEmailAndPassword(auth, data.get("email"), data.get("password"));
+        progress.advance("Аккаунт создан");
         const name = data.get("name").trim();
         await updateProfile(credential.user, { displayName: name });
         await setDoc(doc(db, "profiles", credential.user.uid), {
@@ -238,13 +357,76 @@ function renderAuth(mode = "welcome") {
           email: data.get("email"),
           createdAt: serverTimestamp(),
         });
+        progress.advance("Профиль сохранён");
+        await sendEmailVerification(credential.user);
+        progress.advance("Письмо отправлено");
+        renderEmailVerification({ sent: true });
       } else {
         await signInWithEmailAndPassword(auth, data.get("email"), data.get("password"));
+        progress.advance("Вход выполнен");
       }
     } catch (error) {
       showMessage(readError(error));
+    } finally {
+      progress.finish();
     }
   };
+}
+
+function renderEmailVerification({ sent = false } = {}) {
+  app.innerHTML = `
+    <section class="screen auth-screen">
+      <div class="card auth-card verification-card">
+        <div class="verification-icon" aria-hidden="true">@</div>
+        <h2>Подтвердите email</h2>
+        <p class="subtitle">Мы отправили письмо на <strong>${esc(user?.email || "указанный адрес")}</strong>. Перейдите по ссылке в письме, затем вернитесь сюда.</p>
+        <div class="verification-steps">
+          <span>1</span><p>Проверьте папки «Входящие» и «Спам».</p>
+          <span>2</span><p>Нажмите ссылку подтверждения в письме.</p>
+          <span>3</span><p>Вернитесь и нажмите кнопку ниже.</p>
+        </div>
+        <div class="auth-actions">
+          <button class="button primary" data-check-verification>Я подтвердил(а) email</button>
+          <button class="button ghost" data-resend-verification>Отправить письмо ещё раз</button>
+          <button class="link-button" data-verification-signout>Выйти из аккаунта</button>
+        </div>
+        <div data-message>${sent ? '<p class="success">Письмо отправлено. Оно может прийти в течение нескольких минут.</p>' : ""}</div>
+      </div>
+    </section>`;
+
+  document.querySelector("[data-check-verification]").onclick = async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.innerHTML = '<span class="button-spinner" aria-hidden="true"></span>Проверяю…';
+    try {
+      await auth.currentUser.reload();
+      await auth.currentUser.getIdToken(true);
+      user = auth.currentUser;
+      if (!user.emailVerified) throw new Error("Email пока не подтверждён. Откройте ссылку из письма и повторите проверку.");
+      loader("Открываю проекты…");
+      await continueAuthenticatedSession();
+    } catch (error) {
+      showMessage(readError(error));
+      button.disabled = false;
+      button.textContent = "Я подтвердил(а) email";
+    }
+  };
+
+  document.querySelector("[data-resend-verification]").onclick = async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.innerHTML = '<span class="button-spinner" aria-hidden="true"></span>Отправляю…';
+    try {
+      await sendEmailVerification(auth.currentUser);
+      showMessage("Новое письмо отправлено. Проверьте также папку «Спам».", "success");
+    } catch (error) {
+      showMessage(readError(error));
+    } finally {
+      button.disabled = false;
+      button.textContent = "Отправить письмо ещё раз";
+    }
+  };
+  document.querySelector("[data-verification-signout]").onclick = () => signOut(auth);
 }
 
 /* ---------------- Данные и главный экран ---------------- */
@@ -428,6 +610,7 @@ function renderCreateProject() {
             <label class="check-pill"><input type="checkbox" value="${network.key}" ${rubric.networkKeys.includes(network.key) ? "checked" : ""}>${esc(network.name)}</label>`).join("") : '<span class="muted">Сначала добавьте соцсеть.</span>'}
         </div>
         <button type="button" class="icon-button" data-remove-create-rubric="${index}" aria-label="Удалить рубрику">×</button>
+        <p class="rubric-row-hint" data-rubric-hint hidden></p>
       </div>`).join("");
 
     networkList.querySelectorAll("[data-remove-create-network]").forEach((button) => {
@@ -449,6 +632,7 @@ function renderCreateProject() {
         drawSetup();
       };
     });
+    bindRubricValidation("[data-create-rubric-row]");
   };
 
   const renderSetupStep = () => {
@@ -514,19 +698,22 @@ function renderCreateProject() {
       event.preventDefault();
       const form = event.currentTarget;
       syncRubrics();
-      const validRubrics = draft.rubrics
-        .map((rubric) => ({ name: rubric.name.trim(), networkKeys: rubric.networkKeys }))
-        .filter((rubric) => rubric.name);
-      const submitButton = form.querySelector("[data-finish-create]");
+      const validRubrics = draft.rubrics.map((rubric) => ({ name: rubric.name.trim(), networkKeys: rubric.networkKeys }));
+      const validation = refreshRubricValidation("[data-create-rubric-row]", true);
+      if (!draft.networks.length) {
+        showMessage("Сначала добавьте хотя бы одну соцсеть.", "error", form);
+        return;
+      }
+      if (!validation.valid) {
+        showMessage("Исправьте отмеченные рубрики и повторите сохранение.", "error", form);
+        focusFirstRubricError(validation);
+        return;
+      }
+      const progress = beginFormProgress(form, "Создаю проект…", 5 + draft.networks.length + validRubrics.length);
+      if (!progress) return;
       try {
-        if (!draft.networks.length) throw new Error("Добавьте хотя бы одну соцсеть.");
-        if (!validRubrics.length) throw new Error("Добавьте хотя бы одну рубрику.");
-        if (validRubrics.some((rubric) => !rubric.networkKeys.length)) {
-          throw new Error("Для каждой рубрики выберите хотя бы одну соцсеть.");
-        }
-        submitButton.disabled = true;
-        submitButton.textContent = "Создаю…";
         const shareCode = await uniqueCode();
+        progress.advance("Подготавливаю проект");
         const projectDoc = await addDoc(collection(db, "projects"), {
           ownerId: user.uid,
           name: draft.name,
@@ -535,6 +722,7 @@ function renderCreateProject() {
           planStartDate: todayIso(),
           createdAt: serverTimestamp(),
         });
+        progress.advance("Проект создан");
         await setDoc(doc(db, "memberships", `${projectDoc.id}_${user.uid}`), {
           projectId: projectDoc.id,
           userId: user.uid,
@@ -543,12 +731,14 @@ function renderCreateProject() {
           userEmail: user.email || "",
           joinedAt: serverTimestamp(),
         });
+        progress.advance("Доступ владельца настроен");
         await setDoc(doc(db, "invitations", shareCode), {
           projectId: projectDoc.id,
           role: "viewer",
           active: true,
           createdAt: serverTimestamp(),
         });
+        progress.advance("Код приглашения создан");
         const networkIds = new Map();
         for (const network of draft.networks) {
           const networkDoc = await addDoc(collection(db, "projects", projectDoc.id, "networks"), {
@@ -556,6 +746,7 @@ function renderCreateProject() {
             createdAt: serverTimestamp(),
           });
           networkIds.set(network.key, networkDoc.id);
+          progress.advance(`Добавлена соцсеть «${network.name}»`);
         }
         for (const rubric of validRubrics) {
           await addDoc(collection(db, "projects", projectDoc.id, "rubrics"), {
@@ -563,13 +754,15 @@ function renderCreateProject() {
             networkIds: rubric.networkKeys.map((key) => networkIds.get(key)),
             createdAt: serverTimestamp(),
           });
+          progress.advance(`Добавлена рубрика «${rubric.name}»`);
         }
         await loadProjects();
-        renderNetworkSelection(projectById(projectDoc.id));
+        progress.advance("Проект готов");
+        await renderNetworkSelection(projectById(projectDoc.id));
       } catch (error) {
-        submitButton.disabled = false;
-        submitButton.textContent = "Создать проект";
         showMessage(readError(error), "error", form);
+      } finally {
+        progress.finish();
       }
     };
   };
@@ -602,7 +795,7 @@ async function renderRubricSetup(project, options = {}) {
   const networks = await getNetworks(project.id);
   const existing = await getRubrics(project.id);
   const rows = existing.length
-    ? existing.map((rubric) => ({ id: rubric.id, name: rubric.name, networkIds: [...(rubric.networkIds || [])] }))
+    ? existing.map((rubric) => ({ id: rubric.id, name: rubric.name, networkIds: rubricNetworkIds(rubric, networks) }))
     : [{ id: "", name: "", networkIds: [] }];
   const removed = new Set();
 
@@ -615,9 +808,11 @@ async function renderRubricSetup(project, options = {}) {
           ${networks.map((network) => `<label class="check-pill"><input type="checkbox" value="${network.id}" ${row.networkIds.includes(network.id) ? "checked" : ""}>${esc(network.name)}</label>`).join("")}
         </div>
         <button type="button" class="icon-button" data-remove-rubric="${index}" aria-label="Удалить рубрику">×</button>
+        <p class="rubric-row-hint" data-rubric-hint hidden></p>
       </div>`).join("");
     list.querySelectorAll("[data-remove-rubric]").forEach((button) => {
       button.onclick = () => {
+        syncRowsFromDom(rows);
         const index = Number(button.dataset.removeRubric);
         if (rows[index].id) removed.add(rows[index].id);
         rows.splice(index, 1);
@@ -625,6 +820,7 @@ async function renderRubricSetup(project, options = {}) {
         drawRows();
       };
     });
+    bindRubricValidation("[data-rubric-row]");
   };
 
   app.innerHTML = `
@@ -655,21 +851,33 @@ async function renderRubricSetup(project, options = {}) {
 
   document.querySelector("#rubrics-form").onsubmit = async (event) => {
     event.preventDefault();
+    const form = event.currentTarget;
     syncRowsFromDom(rows);
+    const validation = refreshRubricValidation("[data-rubric-row]", true);
+    if (!validation.valid) {
+      showMessage("Исправьте отмеченные рубрики и повторите сохранение.", "error", form);
+      focusFirstRubricError(validation);
+      return;
+    }
+    const progress = beginFormProgress(form, "Сохраняю рубрики…", removed.size + rows.length);
+    if (!progress) return;
     try {
-      const validRows = rows.filter((row) => row.name.trim());
-      if (!validRows.length) throw new Error("Добавьте хотя бы одну рубрику.");
-      if (validRows.some((row) => !row.networkIds.length)) throw new Error("Для каждой рубрики выберите хотя бы одну соцсеть.");
-      for (const id of removed) await deleteDoc(doc(db, "projects", project.id, "rubrics", id));
-      for (const row of validRows) {
+      for (const id of removed) {
+        await deleteDoc(doc(db, "projects", project.id, "rubrics", id));
+        progress.advance("Удаляю ненужную рубрику");
+      }
+      for (const row of rows) {
         const payload = { name: row.name.trim(), networkIds: row.networkIds, updatedAt: serverTimestamp() };
         if (row.id) await updateDoc(doc(db, "projects", project.id, "rubrics", row.id), payload);
         else await addDoc(collection(db, "projects", project.id, "rubrics"), { ...payload, createdAt: serverTimestamp() });
+        progress.advance(`Сохранена рубрика «${row.name.trim()}»`);
       }
       if (options.returnToPlan) renderPlan(options.returnToPlan.projectId, options.returnToPlan.networkId);
       else renderNetworkSelection(project);
     } catch (error) {
-      showMessage(readError(error));
+      showMessage(readError(error), "error", form);
+    } finally {
+      progress.finish();
     }
   };
 }
@@ -687,7 +895,7 @@ async function renderNetworkSettings(project) {
   const networks = await getNetworks(project.id);
   const existingRubrics = await getRubrics(project.id);
   const rubricRows = existingRubrics.length
-    ? existingRubrics.map((rubric) => ({ id: rubric.id, name: rubric.name, networkIds: [...(rubric.networkIds || [])] }))
+    ? existingRubrics.map((rubric) => ({ id: rubric.id, name: rubric.name, networkIds: rubricNetworkIds(rubric, networks) }))
     : [{ id: "", name: "", networkIds: [] }];
   const removedRubrics = new Set();
 
@@ -700,6 +908,7 @@ async function renderNetworkSettings(project) {
           ${networks.map((network) => `<label class="check-pill"><input type="checkbox" value="${network.id}" ${row.networkIds.includes(network.id) ? "checked" : ""}>${esc(network.name)}</label>`).join("")}
         </div>
         <button type="button" class="icon-button" data-remove-project-rubric="${index}" aria-label="Удалить рубрику">×</button>
+        <p class="rubric-row-hint" data-rubric-hint hidden></p>
       </div>`).join("");
     list.querySelectorAll("[data-remove-project-rubric]").forEach((button) => {
       button.onclick = () => {
@@ -711,6 +920,7 @@ async function renderNetworkSettings(project) {
         drawProjectRubrics();
       };
     });
+    bindRubricValidation("[data-project-rubric-row]");
   };
 
   const syncProjectRubrics = () => {
@@ -735,6 +945,7 @@ async function renderNetworkSettings(project) {
           <form class="form settings-inline-form" id="network-settings-form">
             <label>Новая соцсеть<input name="name" required maxlength="40" placeholder="Название площадки"></label>
             <button class="button">Добавить</button>
+            <div data-message></div>
           </form>
         </section>
         <section class="settings-section">
@@ -753,9 +964,19 @@ async function renderNetworkSettings(project) {
   drawProjectRubrics();
   document.querySelector("#network-settings-form").onsubmit = async (event) => {
     event.preventDefault();
-    const name = new FormData(event.currentTarget).get("name").trim();
-    await addDoc(collection(db, "projects", project.id, "networks"), { name, createdAt: serverTimestamp() });
-    renderNetworkSettings(project);
+    const form = event.currentTarget;
+    const name = new FormData(form).get("name").trim();
+    const progress = beginFormProgress(form, "Добавляю соцсеть…");
+    if (!progress) return;
+    try {
+      await addDoc(collection(db, "projects", project.id, "networks"), { name, createdAt: serverTimestamp() });
+      progress.advance("Соцсеть добавлена");
+      await renderNetworkSettings(project);
+    } catch (error) {
+      showMessage(readError(error), "error", form);
+    } finally {
+      progress.finish();
+    }
   };
   document.querySelectorAll("[data-delete-network]").forEach((button) => {
     button.onclick = async () => {
@@ -771,20 +992,36 @@ async function renderNetworkSettings(project) {
   };
   document.querySelector("#project-rubrics-form").onsubmit = async (event) => {
     event.preventDefault();
+    const form = event.currentTarget;
     syncProjectRubrics();
+    const validation = refreshRubricValidation("[data-project-rubric-row]", true);
+    if (!validation.valid) {
+      showMessage("Исправьте отмеченные рубрики и повторите сохранение.", "error", form);
+      focusFirstRubricError(validation);
+      return;
+    }
+    const progress = beginFormProgress(form, "Сохраняю рубрики…", removedRubrics.size + rubricRows.length);
+    if (!progress) return;
     try {
-      const validRows = rubricRows.filter((row) => row.name.trim());
-      if (!validRows.length) throw new Error("Добавьте хотя бы одну рубрику.");
-      if (validRows.some((row) => !row.networkIds.length)) throw new Error("Для каждой рубрики выберите хотя бы одну соцсеть.");
-      for (const id of removedRubrics) await deleteDoc(doc(db, "projects", project.id, "rubrics", id));
-      for (const row of validRows) {
+      for (const id of removedRubrics) {
+        await deleteDoc(doc(db, "projects", project.id, "rubrics", id));
+        progress.advance("Удаляю ненужную рубрику");
+      }
+      removedRubrics.clear();
+      for (const row of rubricRows) {
         const payload = { name: row.name.trim(), networkIds: row.networkIds, updatedAt: serverTimestamp() };
         if (row.id) await updateDoc(doc(db, "projects", project.id, "rubrics", row.id), payload);
-        else await addDoc(collection(db, "projects", project.id, "rubrics"), { ...payload, createdAt: serverTimestamp() });
+        else {
+          const createdRubric = await addDoc(collection(db, "projects", project.id, "rubrics"), { ...payload, createdAt: serverTimestamp() });
+          row.id = createdRubric.id;
+        }
+        progress.advance(`Сохранена рубрика «${row.name.trim()}»`);
       }
-      showMessage("Рубрики сохранены.", "success", event.currentTarget);
+      showMessage("Рубрики сохранены.", "success", form);
     } catch (error) {
-      showMessage(readError(error), "error", event.currentTarget);
+      showMessage(readError(error), "error", form);
+    } finally {
+      progress.finish();
     }
   };
 }
@@ -983,7 +1220,7 @@ async function renderPlan(projectId, networkId) {
   const project = { id: projectDoc.id, ...projectDoc.data(), role: membershipDoc.data().role };
   const network = { id: networkDoc.id, ...networkDoc.data() };
   const allRubrics = await getRubrics(projectId);
-  const rubrics = allRubrics.filter((rubric) => (rubric.networkIds || []).includes(networkId));
+  const rubrics = allRubrics.filter((rubric) => rubricAppliesToNetwork(rubric, networkId));
   const postsSnapshot = await getDocs(collection(db, "projects", projectId, "posts"));
   const posts = postsSnapshot.docs
     .map((item) => ({ id: item.id, ...item.data() }))
@@ -1294,21 +1531,29 @@ function blobToDataUrl(blob) {
 
 /* ---------------- Запуск ---------------- */
 
+async function continueAuthenticatedSession() {
+  const params = new URLSearchParams(window.location.search);
+  const planProjectId = params.get("plan");
+  const planNetworkId = params.get("network");
+  if (planProjectId && planNetworkId) await renderPlan(planProjectId, planNetworkId);
+  else {
+    await loadProjects();
+    renderDashboard();
+  }
+}
+
 onAuthStateChanged(auth, async (nextUser) => {
   user = nextUser;
   if (!user) {
     renderAuth();
     return;
   }
+  if (!user.emailVerified) {
+    renderEmailVerification();
+    return;
+  }
   try {
-    const params = new URLSearchParams(window.location.search);
-    const planProjectId = params.get("plan");
-    const planNetworkId = params.get("network");
-    if (planProjectId && planNetworkId) await renderPlan(planProjectId, planNetworkId);
-    else {
-      await loadProjects();
-      renderDashboard();
-    }
+    await continueAuthenticatedSession();
   } catch (error) {
     app.innerHTML = `<div class="loader"><div><h2>Не удалось открыть страницу</h2><p class="error">${esc(readError(error))}</p><button class="button" onclick="location.reload()">Обновить</button></div></div>`;
   }

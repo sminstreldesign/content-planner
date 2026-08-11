@@ -1,7 +1,10 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
+    function authenticated() { return request.auth != null; }
+    function signedIn() {
+      return authenticated() && request.auth.token.email_verified == true;
+    }
     function member(projectId) {
       return get(/databases/$(database)/documents/memberships/$(projectId + '_' + request.auth.uid));
     }
@@ -14,7 +17,7 @@ service cloud.firestore {
     }
 
     match /profiles/{userId} {
-      allow create: if signedIn() && request.auth.uid == userId;
+      allow create: if authenticated() && request.auth.uid == userId;
       allow read, update: if signedIn() && request.auth.uid == userId;
       allow delete: if false;
     }
