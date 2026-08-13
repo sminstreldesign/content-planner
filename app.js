@@ -341,6 +341,48 @@ function verificationOlivesMarkup() {
   return `<div class="verification-olives" aria-hidden="true">${olive("one")}${olive("two")}${olive("three")}</div>`;
 }
 
+function dashboardOliveMarkup() {
+  return `
+    <div class="dashboard-olive-scene" aria-hidden="true">
+      <span class="olive-confetti olive-confetti-one"></span>
+      <span class="olive-confetti olive-confetti-two"></span>
+      <span class="olive-confetti olive-confetti-three"></span>
+      <span class="olive-confetti olive-confetti-four"></span>
+      <svg class="dashboard-olive" viewBox="0 0 220 230">
+        <ellipse class="dashboard-olive-shadow" cx="110" cy="211" rx="48" ry="9" />
+        <g class="dashboard-olive-character">
+          <g class="dashboard-olive-leg dashboard-olive-leg-left">
+            <path d="M90 174c-2 17-9 27-23 34" />
+            <path d="M68 208H51" />
+          </g>
+          <g class="dashboard-olive-leg dashboard-olive-leg-right">
+            <path d="M130 174c2 17 9 27 23 34" />
+            <path d="M152 208h17" />
+          </g>
+          <g class="dashboard-olive-arm dashboard-olive-arm-left">
+            <path d="M65 91C43 87 33 74 29 56" />
+            <path d="m29 56-12 9m12-9 10 8" />
+          </g>
+          <g class="dashboard-olive-arm dashboard-olive-arm-right">
+            <path d="M155 91c22-4 32-17 36-35" />
+            <path d="m191 56-12 9m12-9 10 8" />
+          </g>
+          <path class="dashboard-olive-body" d="M110 27c39 0 61 38 61 81 0 49-23 78-61 78s-61-29-61-78c0-43 22-81 61-81Z" />
+          <path class="dashboard-olive-shine" d="M75 65c9-18 21-28 36-33-15 22-22 43-23 65-14-6-20-18-13-32Z" />
+          <ellipse class="dashboard-olive-opening" cx="110" cy="31" rx="22" ry="9" />
+          <ellipse class="dashboard-olive-pimento" cx="110" cy="31" rx="13" ry="5.5" />
+          <circle class="dashboard-olive-cheek" cx="79" cy="120" r="8" />
+          <circle class="dashboard-olive-cheek" cx="141" cy="120" r="8" />
+          <ellipse class="dashboard-olive-eye" cx="88" cy="101" rx="6" ry="8" />
+          <ellipse class="dashboard-olive-eye" cx="132" cy="101" rx="6" ry="8" />
+          <circle class="dashboard-olive-eye-glint" cx="90" cy="98" r="2" />
+          <circle class="dashboard-olive-eye-glint" cx="134" cy="98" r="2" />
+          <path class="dashboard-olive-mouth" d="M86 128q24 27 48 0" />
+        </g>
+      </svg>
+    </div>`;
+}
+
 function renderEmailActionState(state, message = "") {
   const states = {
     loading: {
@@ -571,9 +613,12 @@ async function renderDashboard() {
         </aside>
         <main class="dashboard-main">
           <div class="page-topbar"><span></span>${accountMarkup({ showHome: false })}</div>
-          <div class="welcome-copy">
-            <h1>Здравствуйте, ${esc(user.displayName || "друг")}!</h1>
-            <p class="subtitle">С чего начнём?</p>
+          <div class="welcome-hero">
+            <div class="welcome-copy">
+              <h1>Здравствуйте, ${esc(user.displayName || "друг")}!</h1>
+              <p class="subtitle">С чего начнём?</p>
+            </div>
+            ${dashboardOliveMarkup()}
           </div>
         </main>
       </div>
