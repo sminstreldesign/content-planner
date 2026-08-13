@@ -383,6 +383,7 @@ textarea { min-height: 105px; resize: vertical; }
 @media (max-width: 820px) {
   .screen { padding: 18px; }
   .dashboard { grid-template-columns: 1fr; gap: 18px; }
+  .dashboard-main { order: -1; }
   .sidebar { min-height: auto; }
   .dashboard-main .page-topbar { margin-bottom: 30px; }
   .form-row, .post-editor-grid { grid-template-columns: 1fr; }
