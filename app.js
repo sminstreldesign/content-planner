@@ -457,12 +457,10 @@ async function renderEmailVerificationAction(code) {
 }
 
 function renderAuth(mode = "welcome") {
-  const welcome = `
-    <p class="subtitle">Создавайте контент-планы для проектов и работайте в команде</p>
-    <div class="auth-actions">
-      <button class="button primary" data-auth-mode="login">Войти</button>
-      <button class="button" data-auth-mode="register">Зарегистрироваться</button>
-    </div>`;
+  if (mode === "welcome") {
+    renderLanding();
+    return;
+  }
 
   const isRegister = mode === "register";
   const form = `
@@ -476,11 +474,24 @@ function renderAuth(mode = "welcome") {
     </form>
     <div data-message></div>`;
 
-  app.innerHTML = `<section class="screen auth-screen"><div class="card auth-card"><h1>Контент-план</h1>${mode === "welcome" ? welcome : form}</div></section>`;
+  app.innerHTML = `
+    <section class="screen auth-screen auth-form-screen">
+      <button class="landing-brand auth-brand" type="button" data-auth-back aria-label="Вернуться на главную">
+        <span class="landing-brand-mark" aria-hidden="true">К</span>
+        <span>Контент-план</span>
+      </button>
+      <div class="card auth-card">
+        <p class="landing-kicker">${isRegister ? "Новый аккаунт" : "С возвращением"}</p>
+        <h1>${isRegister ? "Начните с одного проекта" : "Войдите в контент-план"}</h1>
+        ${form}
+      </div>
+    </section>`;
   document.querySelectorAll("[data-auth-mode]").forEach((button) => {
     button.onclick = () => renderAuth(button.dataset.authMode);
   });
-  document.querySelector("[data-auth-back]")?.addEventListener("click", () => renderAuth());
+  document.querySelectorAll("[data-auth-back]").forEach((button) => {
+    button.addEventListener("click", () => renderAuth());
+  });
 
   const authForm = document.querySelector("#auth-form");
   if (!authForm) return;
@@ -514,6 +525,216 @@ function renderAuth(mode = "welcome") {
       progress.finish();
     }
   };
+}
+
+function renderLanding() {
+  app.innerHTML = `
+    <div class="landing-page">
+      <header class="landing-header" data-landing-header>
+        <a class="landing-brand" href="#top" aria-label="Контент-план — на главную">
+          <span class="landing-brand-mark" aria-hidden="true">К</span>
+          <span>Контент-план</span>
+        </a>
+        <nav class="landing-nav" aria-label="Основная навигация">
+          <a href="#features">Возможности</a>
+          <a href="#workflow">Как работает</a>
+          <a href="#team">Для команды</a>
+        </nav>
+        <div class="landing-header-actions">
+          <button class="landing-text-button" type="button" data-auth-mode="login">Войти</button>
+          <button class="button primary landing-small-cta" type="button" data-auth-mode="register">Начать бесплатно</button>
+        </div>
+      </header>
+
+      <main id="top">
+        <section class="landing-hero" aria-labelledby="landing-title">
+          <div class="landing-hero-copy" data-reveal>
+            <p class="landing-kicker">Планирование контента для команды</p>
+            <h1 id="landing-title">Публикации — по плану. Материалы — под рукой.</h1>
+            <p class="landing-lead">Соберите проекты, площадки, рубрики и публикации в одном месте. Команда сразу видит, что готовить, кто отвечает и когда выпускать.</p>
+            <div class="landing-hero-actions">
+              <button class="button primary landing-main-cta" type="button" data-auth-mode="register">Создать первый проект</button>
+              <a class="landing-secondary-link" href="#workflow">Посмотреть, как работает <span aria-hidden="true">↓</span></a>
+            </div>
+            <p class="landing-note">Бесплатный старт · без банковской карты</p>
+          </div>
+          <div class="landing-hero-visual" data-reveal>
+            <div class="landing-speech">Привет! Я Олли.<br>Покажу, как навести порядок.</div>
+            <div class="landing-olive landing-olive-hero" aria-hidden="true">
+              <span class="landing-olive-face"><i></i><i></i><b></b></span>
+              <span class="landing-olive-arm landing-olive-arm-left"></span>
+              <span class="landing-olive-arm landing-olive-arm-right"></span>
+              <span class="landing-olive-leg landing-olive-leg-left"></span>
+              <span class="landing-olive-leg landing-olive-leg-right"></span>
+            </div>
+            <div class="landing-preview-window landing-preview-window-hero">
+              <div class="landing-window-bar"><span></span><span></span><span></span><small>Мои проекты</small></div>
+              <img src="assets/screen-projects.png" alt="Главный экран Контент-плана со списком проектов" width="1440" height="900">
+            </div>
+          </div>
+        </section>
+
+        <section class="landing-proof" aria-label="Главные преимущества">
+          <p>Один план вместо таблиц, заметок и сообщений</p>
+          <ul>
+            <li><strong>5 минут</strong><span>на создание проекта</span></li>
+            <li><strong>3 роли</strong><span>для работы в команде</span></li>
+            <li><strong>4 изображения</strong><span>в каждой публикации</span></li>
+          </ul>
+        </section>
+
+        <section class="landing-section" id="features">
+          <div class="landing-section-heading" data-reveal>
+            <p class="landing-kicker">Всё нужное, ничего лишнего</p>
+            <h2>Сначала настройте проект. Дальше работайте по плану.</h2>
+          </div>
+          <div class="landing-feature-grid">
+            <article class="landing-feature-card landing-feature-card-wide" data-reveal>
+              <div class="landing-feature-copy">
+                <span class="landing-feature-number">01</span>
+                <h3>Разделите работу по проектам</h3>
+                <p>Создайте отдельный план для бренда, клиента или направления. Пригласите коллег по восьмизначному коду.</p>
+              </div>
+              <div class="landing-preview-window">
+                <div class="landing-window-bar"><span></span><span></span><span></span><small>Проекты</small></div>
+                <img src="assets/screen-projects.png" alt="Список реальных проектов в Контент-плане" loading="lazy" width="1440" height="900">
+              </div>
+            </article>
+            <article class="landing-feature-card" data-reveal>
+              <span class="landing-feature-number">02</span>
+              <h3>Добавьте свои площадки</h3>
+              <p>Telegram, VK, Дзен или корпоративный блог — укажите только те каналы, с которыми работаете.</p>
+              <div class="landing-channel-pills" aria-label="Примеры площадок">
+                <span>Telegram</span><span>VK</span><span>Дзен</span>
+              </div>
+            </article>
+            <article class="landing-feature-card landing-feature-card-olive" data-reveal>
+              <span class="landing-feature-number">03</span>
+              <h3>Закрепите рубрики</h3>
+              <p>Свяжите каждую рубрику с одной или несколькими площадками. В плане останутся только подходящие темы.</p>
+              <div class="landing-rubric-sample">
+                <span>Кейсы</span><i>Telegram</i><i>VK</i>
+                <span>Новости</span><i>Дзен</i>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="landing-workflow" id="workflow">
+          <div class="landing-section-heading" data-reveal>
+            <p class="landing-kicker">Рабочий процесс</p>
+            <h2>От идеи до публикации — в одном окне</h2>
+            <p>Выберите дату и рубрику, добавьте текст, материалы и статус. Контент сразу появится в общем календаре.</p>
+          </div>
+          <div class="landing-product-stage" data-reveal>
+            <div class="landing-stage-tabs" role="tablist" aria-label="Экраны продукта">
+              <button type="button" role="tab" aria-selected="true" data-screen="assets/screen-settings.png" data-screen-alt="Настройки площадок и рубрик" data-screen-caption="Настройте площадки и рубрики один раз — они появятся во всех планах проекта.">1. Настройка</button>
+              <button type="button" role="tab" aria-selected="false" data-screen="assets/screen-editor.png" data-screen-alt="Редактор публикации с текстом и материалами" data-screen-caption="Соберите текст, референсы, визуал и статус публикации в одной карточке.">2. Публикация</button>
+              <button type="button" role="tab" aria-selected="false" data-screen="assets/screen-plan.png" data-screen-alt="Календарный контент-план проекта" data-screen-caption="Смотрите месяц целиком и открывайте любую публикацию прямо из календаря.">3. План</button>
+            </div>
+            <div class="landing-preview-window landing-stage-window">
+              <div class="landing-window-bar"><span></span><span></span><span></span><small data-screen-title>Настройка проекта</small></div>
+              <img data-product-screen src="assets/screen-settings.png" alt="Настройки площадок и рубрик" loading="lazy" width="1440" height="900">
+            </div>
+            <p class="landing-stage-caption" data-screen-caption-target>Настройте площадки и рубрики один раз — они появятся во всех планах проекта.</p>
+          </div>
+        </section>
+
+        <section class="landing-team landing-section" id="team">
+          <div class="landing-team-copy" data-reveal>
+            <p class="landing-kicker">Командная работа без путаницы</p>
+            <h2>Каждый видит своё и не ломает чужое</h2>
+            <p>Владелец управляет проектом и доступами. Редактор меняет план и публикации. Читатель следит за работой без права редактирования.</p>
+            <ul class="landing-check-list">
+              <li>Приглашение по короткому коду</li>
+              <li>Понятные роли и права</li>
+              <li>Комментарии внутри публикации</li>
+            </ul>
+          </div>
+          <div class="landing-team-scene" data-reveal aria-label="Три роли в команде">
+            <div class="landing-role-card"><span>В</span><div><strong>Владелец</strong><small>Настройки и доступы</small></div></div>
+            <div class="landing-role-card"><span>Р</span><div><strong>Редактор</strong><small>План и публикации</small></div></div>
+            <div class="landing-role-card"><span>Ч</span><div><strong>Читатель</strong><small>Просмотр проекта</small></div></div>
+            <div class="landing-olive landing-olive-runner" aria-hidden="true"><span class="landing-olive-face"><i></i><i></i><b></b></span><span class="landing-olive-arm landing-olive-arm-left"></span><span class="landing-olive-arm landing-olive-arm-right"></span><span class="landing-olive-leg landing-olive-leg-left"></span><span class="landing-olive-leg landing-olive-leg-right"></span></div>
+          </div>
+        </section>
+
+        <section class="landing-faq landing-section">
+          <div class="landing-section-heading" data-reveal>
+            <p class="landing-kicker">Коротко о главном</p>
+            <h2>Перед стартом</h2>
+          </div>
+          <div class="landing-faq-list" data-reveal>
+            <details><summary>Нужно переносить план из таблицы?</summary><p>Нет. Создайте проект, добавьте площадки и начните с ближайших публикаций. Старый план можно оставить как архив.</p></details>
+            <details><summary>Можно работать с телефона?</summary><p>Да. Интерфейс адаптирован для мобильного экрана: можно открыть план, публикацию и материалы.</p></details>
+            <details><summary>Где хранятся изображения?</summary><p>Сервис сжимает изображения в браузере и сохраняет их вместе с публикацией. Поддерживается до четырёх файлов в каждом поле.</p></details>
+          </div>
+        </section>
+
+        <section class="landing-final-cta" data-reveal>
+          <div>
+            <p class="landing-kicker">Начните с ближайшего месяца</p>
+            <h2>Создайте проект. Первый план займёт несколько минут.</h2>
+          </div>
+          <button class="button primary landing-main-cta" type="button" data-auth-mode="register">Начать бесплатно</button>
+        </section>
+      </main>
+
+      <footer class="landing-footer">
+        <a class="landing-brand" href="#top"><span class="landing-brand-mark" aria-hidden="true">К</span><span>Контент-план</span></a>
+        <p>Планируйте. Согласовывайте. Публикуйте.</p>
+        <button class="landing-text-button" type="button" data-auth-mode="login">Войти</button>
+      </footer>
+    </div>`;
+
+  document.querySelectorAll("[data-auth-mode]").forEach((button) => {
+    button.onclick = () => renderAuth(button.dataset.authMode);
+  });
+
+  document.querySelectorAll('.landing-page a[href^="#"]').forEach((link) => {
+    link.addEventListener("click", (event) => {
+      const target = document.querySelector(link.getAttribute("href"));
+      if (!target) return;
+      event.preventDefault();
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+
+  const screen = document.querySelector("[data-product-screen]");
+  const caption = document.querySelector("[data-screen-caption-target]");
+  const title = document.querySelector("[data-screen-title]");
+  document.querySelectorAll("[data-screen]").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelectorAll("[data-screen]").forEach((item) => item.setAttribute("aria-selected", String(item === button)));
+      screen.classList.add("is-changing");
+      window.setTimeout(() => {
+        screen.src = button.dataset.screen;
+        screen.alt = button.dataset.screenAlt;
+        caption.textContent = button.dataset.screenCaption;
+        title.textContent = button.textContent.replace(/^\d\.\s*/, "");
+        screen.classList.remove("is-changing");
+      }, 160);
+    });
+  });
+
+  const revealItems = document.querySelectorAll("[data-reveal]");
+  if ("IntersectionObserver" in window) {
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        entry.target.classList.add("is-visible");
+        observer.unobserve(entry.target);
+      });
+    }, { threshold: 0.12 });
+    revealItems.forEach((item) => observer.observe(item));
+  } else {
+    revealItems.forEach((item) => item.classList.add("is-visible"));
+  }
+
+  const header = document.querySelector("[data-landing-header]");
+  const updateHeader = () => header.classList.toggle("is-scrolled", window.scrollY > 18);
+  updateHeader();
+  window.onscroll = updateHeader;
 }
 
 function renderEmailVerification({ sent = false } = {}) {
