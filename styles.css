@@ -364,11 +364,75 @@ textarea { min-height: 105px; resize: vertical; }
 @keyframes tiny-leg-right { 0%, 100% { transform: rotate(-14deg); } 50% { transform: rotate(16deg); } }
 @keyframes error-dot-drift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-14px); } }
 
+.email-action-screen {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(var(--accent-rgb), .22), transparent 26%),
+    radial-gradient(circle at 88% 82%, rgba(var(--secondary-rgb), .24), transparent 30%),
+    var(--background);
+}
+.email-action-screen::before,
+.email-action-screen::after {
+  position: absolute;
+  width: 240px;
+  height: 240px;
+  border: 1px solid rgba(var(--primary-rgb), .1);
+  border-radius: 48% 52% 55% 45%;
+  content: "";
+  transform: rotate(24deg);
+}
+.email-action-screen::before { top: -135px; left: -90px; }
+.email-action-screen::after { right: -110px; bottom: -145px; transform: rotate(-18deg); }
 .verification-card { max-width: 680px; }
+.email-action-card { position: relative; z-index: 1; overflow: hidden; }
+.email-action-card h1 { margin-bottom: 16px; white-space: normal; font-size: clamp(2.35rem, 6vw, 4.4rem); }
+.email-action-card h2 { margin-bottom: 16px; }
+.email-action-eyebrow { margin-bottom: 0; color: var(--secondary); font-size: .78rem; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
+.email-action-controls { display: grid; justify-items: center; min-height: 48px; align-items: center; }
+.email-action-button { min-width: min(100%, 260px); text-decoration: none; box-shadow: 0 10px 24px rgba(var(--primary-rgb), .2); }
+.email-action-loader { width: 28px; height: 28px; border: 3px solid rgba(var(--primary-rgb), .2); border-right-color: var(--primary); border-radius: 50%; animation: spin .75s linear infinite; }
 .verification-icon { display: grid; width: 58px; height: 58px; margin: 0 auto 18px; place-items: center; border-radius: 18px; background: var(--primary); color: var(--surface); font-size: 1.65rem; font-weight: 700; }
 .verification-steps { display: grid; grid-template-columns: 30px 1fr; gap: 10px 12px; margin: 24px 0; text-align: left; }
 .verification-steps span { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; background: rgba(var(--secondary-rgb), .22); color: var(--primary); font-size: .85rem; font-weight: 700; }
 .verification-steps p { align-self: center; margin: 0; }
+
+.verification-olives { display: flex; height: 122px; justify-content: center; align-items: end; gap: clamp(4px, 3vw, 22px); margin: 4px auto 8px; }
+.verification-olive { width: clamp(66px, 15vw, 88px); height: auto; overflow: visible; }
+.verification-olive-character,
+.verification-olive-shadow,
+.verification-olive-arm,
+.verification-olive-leg { transform-box: fill-box; }
+.verification-olive-character { transform-origin: center bottom; animation: happy-olive-jump 1.12s cubic-bezier(.45, 0, .35, 1) infinite; }
+.verification-olive-one .verification-olive-character { animation-delay: -.16s; }
+.verification-olive-two .verification-olive-character { animation-delay: -.54s; animation-duration: .96s; }
+.verification-olive-three .verification-olive-character { animation-delay: -.78s; animation-duration: 1.24s; }
+.verification-olive-shadow { fill: rgba(var(--text-rgb), .14); transform-origin: center; animation: happy-olive-shadow 1.12s ease-in-out infinite; }
+.verification-olive-one .verification-olive-shadow { animation-delay: -.16s; }
+.verification-olive-two .verification-olive-shadow { animation-delay: -.54s; animation-duration: .96s; }
+.verification-olive-three .verification-olive-shadow { animation-delay: -.78s; animation-duration: 1.24s; }
+.verification-olive-body { fill: var(--secondary); stroke: var(--primary); stroke-linejoin: round; stroke-width: 2.5; }
+.verification-olive-shine { fill: rgba(var(--surface-rgb), .38); }
+.verification-olive-opening { fill: var(--primary); }
+.verification-olive-pimento { fill: var(--accent); }
+.verification-olive-eye { fill: var(--text); }
+.verification-olive-mouth,
+.verification-olive-arm path,
+.verification-olive-leg path { fill: none; stroke: var(--text); stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.5; }
+.verification-olive-arm { transform-origin: center top; animation: happy-olive-wave .46s ease-in-out infinite alternate; }
+.verification-olive-arm-right { animation-direction: alternate-reverse; }
+.verification-olive-leg { transform-origin: center top; animation: happy-olive-kick .54s ease-in-out infinite alternate; }
+.verification-olive-leg-right { animation-direction: alternate-reverse; }
+
+@keyframes happy-olive-jump {
+  0%, 100% { transform: translateY(0) scaleY(.96); }
+  12% { transform: translateY(2px) scale(1.04, .91); }
+  48% { transform: translateY(-29px) rotate(3deg) scale(1); }
+  72% { transform: translateY(-9px) rotate(-2deg); }
+}
+@keyframes happy-olive-shadow { 0%, 100% { opacity: .8; transform: scaleX(1); } 48% { opacity: .25; transform: scaleX(.48); } }
+@keyframes happy-olive-wave { from { transform: rotate(-8deg); } to { transform: rotate(10deg); } }
+@keyframes happy-olive-kick { from { transform: rotate(-7deg); } to { transform: rotate(7deg); } }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes loading-slide { from { left: -45%; } 50% { left: 58%; } to { left: 105%; } }
@@ -378,6 +442,7 @@ textarea { min-height: 105px; resize: vertical; }
   .button, .rubric-editor-row, .save-progress-track i { transition: none; }
   .not-found-illustration * { animation: none !important; }
   .olive-in-zero { transform: translateY(0); }
+  .verification-olive *, .email-action-loader { animation: none !important; }
 }
 
 @media (max-width: 820px) {
@@ -397,6 +462,7 @@ textarea { min-height: 105px; resize: vertical; }
 @media (max-width: 520px) {
   .auth-card { padding: 35px 23px; }
   .auth-card h1 { font-size: clamp(2.35rem, 12vw, 3.2rem); }
+  .verification-olives { height: 108px; margin-top: 0; }
   .custom-network { flex-direction: column; }
   .plan-screen { padding: 12px; }
   .plan-header { grid-template-columns: 1fr; }
