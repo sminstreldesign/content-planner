@@ -1052,6 +1052,7 @@ function renderProjectWorkspace(project) {
       number: "02",
       title: "Целевая аудитория",
       description: "Сегменты, потребности и портреты",
+      available: true,
     },
     {
       key: "competitors",
@@ -1089,7 +1090,7 @@ function renderProjectWorkspace(project) {
         <div class="workspace-heading">
           <p class="step-indicator">Рабочее пространство</p>
           <h2>Над чем поработаем?</h2>
-          <p>Выберите направление. Сейчас доступны контент-планы и анализ конкурентов.</p>
+          <p>Выберите направление. Здесь можно вести контент-планы и исследования проекта.</p>
         </div>
         <div class="workspace-layout">
           <div class="workspace-actions">
@@ -1120,7 +1121,331 @@ function renderProjectWorkspace(project) {
 
   bindTopbar(renderDashboard);
   document.querySelector('[data-open-work-area="networks"]').onclick = () => renderNetworkSelection(project);
+  document.querySelector('[data-open-work-area="audience"]').onclick = () => renderAudienceAnalysis(project);
   document.querySelector('[data-open-work-area="competitors"]').onclick = () => renderCompetitorAnalysis(project);
+}
+
+/* ---------------- Анализ целевой аудитории ---------------- */
+
+const AUDIENCE_LIMITS = { segments: 8, criteria: 40 };
+const AUDIENCE_GROUPS = [
+  { name: "Демографические", criteria: ["Возраст", "Пол", "Доход", "Образование", "Семейное положение"] },
+  { name: "Географические", criteria: ["Район", "Город", "Регион", "Страна"] },
+  { name: "Поведенческие", criteria: ["Степень лояльности", "Покупательские привычки", "Частота покупок", "Размер покупок", "Средний чек"] },
+  { name: "Психографические", criteria: ["Мотивации", "Ценности", "Интересы", "Образ жизни"] },
+  { name: "Технологические", criteria: ["Устройства", "Интернет-браузеры", "Операционные системы"] },
+  { name: "Каналы покупок", criteria: ["Сайт", "Мессенджеры", "Соцсети", "Офлайн-магазины", "Телефонные звонки"] },
+  { name: "Интересы", criteria: ["Здоровье", "Спорт", "Мода", "Технологии", "Путешествия"] },
+];
+
+function audienceItemId(prefix) {
+  const randomPart = globalThis.crypto?.randomUUID?.().replaceAll("-", "")
+    || `${Date.now()}${Math.random().toString(16).slice(2)}`;
+  return `${prefix}_${randomPart}`;
+}
+
+function blankAudienceAnalysis() {
+  const segments = [
+    { id: audienceItemId("segment"), name: "Основной сегмент", description: "" },
+    { id: audienceItemId("segment"), name: "Дополнительный сегмент", description: "" },
+  ];
+  return {
+    segments,
+    criteria: AUDIENCE_GROUPS.flatMap((group) => group.criteria.map((name) => ({
+      id: audienceItemId("criterion"),
+      group: group.name,
+      name,
+      values: Object.fromEntries(segments.map((segment) => [segment.id, ""])),
+    }))),
+  };
+}
+
+function normalizeAudienceAnalysis(data) {
+  if (!data || !Array.isArray(data.segments) || !Array.isArray(data.criteria)) return blankAudienceAnalysis();
+  const seenSegmentIds = new Set();
+  const segments = data.segments.slice(0, AUDIENCE_LIMITS.segments).map((segment) => {
+    const storedId = typeof segment?.id === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(segment.id)
+      ? segment.id
+      : audienceItemId("segment");
+    const id = seenSegmentIds.has(storedId) ? audienceItemId("segment") : storedId;
+    seenSegmentIds.add(id);
+    return {
+      id,
+      name: String(segment?.name || "").slice(0, 80),
+      description: String(segment?.description || "").slice(0, 300),
+    };
+  });
+  if (!segments.length) segments.push({ id: audienceItemId("segment"), name: "Основной сегмент", description: "" });
+
+  const seenCriterionIds = new Set();
+  const criteria = data.criteria.slice(0, AUDIENCE_LIMITS.criteria).map((criterion) => {
+    const storedId = typeof criterion?.id === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(criterion.id)
+      ? criterion.id
+      : audienceItemId("criterion");
+    const id = seenCriterionIds.has(storedId) ? audienceItemId("criterion") : storedId;
+    seenCriterionIds.add(id);
+    return {
+      id,
+      group: String(criterion?.group || "Другое").slice(0, 80),
+      name: String(criterion?.name || "").slice(0, 100),
+      values: Object.fromEntries(segments.map((segment) => [
+        segment.id,
+        String(criterion?.values?.[segment.id] || "").slice(0, 1200),
+      ])),
+    };
+  });
+  if (!criteria.length) {
+    criteria.push({
+      id: audienceItemId("criterion"),
+      group: "Другое",
+      name: "",
+      values: Object.fromEntries(segments.map((segment) => [segment.id, ""])),
+    });
+  }
+  return { segments, criteria };
+}
+
+function syncAudienceDraft(draft, root = document) {
+  root.querySelectorAll("[data-audience-segment-name]").forEach((input) => {
+    const segment = draft.segments.find((item) => item.id === input.dataset.audienceSegmentName);
+    if (segment) segment.name = input.value;
+  });
+  root.querySelectorAll("[data-audience-segment-description]").forEach((input) => {
+    const segment = draft.segments.find((item) => item.id === input.dataset.audienceSegmentDescription);
+    if (segment) segment.description = input.value;
+  });
+  root.querySelectorAll("[data-audience-criterion-name]").forEach((input) => {
+    const criterion = draft.criteria.find((item) => item.id === input.dataset.audienceCriterionName);
+    if (criterion) criterion.name = input.value;
+  });
+  root.querySelectorAll("[data-audience-criterion-group]").forEach((input) => {
+    const criterion = draft.criteria.find((item) => item.id === input.dataset.audienceCriterionGroup);
+    if (criterion) criterion.group = input.value;
+  });
+  root.querySelectorAll("[data-audience-value]").forEach((input) => {
+    const criterion = draft.criteria.find((item) => item.id === input.dataset.criterionId);
+    if (criterion) criterion.values[input.dataset.segmentId] = input.value;
+  });
+}
+
+function validateAudienceDraft(draft, root) {
+  const segmentNames = draft.segments.map((segment) => segment.name.trim());
+  const criterionNames = draft.criteria.map((criterion) => criterion.name.trim());
+  const criterionGroups = draft.criteria.map((criterion) => criterion.group.trim());
+  const duplicateIndex = (values) => {
+    const normalized = values.map((value) => value.toLocaleLowerCase("ru-RU"));
+    return normalized.findIndex((value, index) => value && normalized.indexOf(value) !== index);
+  };
+  const emptySegment = segmentNames.findIndex((name) => !name);
+  const emptyCriterion = criterionNames.findIndex((name) => !name);
+  const emptyGroup = criterionGroups.findIndex((name) => !name);
+  const duplicateSegment = duplicateIndex(segmentNames);
+  const criterionKeys = criterionNames.map((name, index) => `${criterionGroups[index]}\u0000${name}`);
+  const duplicateCriterion = duplicateIndex(criterionKeys);
+  let input = null;
+  let message = "";
+  if (emptySegment >= 0) {
+    input = root.querySelector(`[data-audience-segment-name="${draft.segments[emptySegment].id}"]`);
+    message = "Назовите каждый сегмент аудитории.";
+  } else if (emptyGroup >= 0) {
+    input = root.querySelector(`[data-audience-criterion-group="${draft.criteria[emptyGroup].id}"]`);
+    message = "Укажите группу для каждого критерия.";
+  } else if (emptyCriterion >= 0) {
+    input = root.querySelector(`[data-audience-criterion-name="${draft.criteria[emptyCriterion].id}"]`);
+    message = "Заполните название каждого критерия.";
+  } else if (duplicateSegment >= 0) {
+    input = root.querySelector(`[data-audience-segment-name="${draft.segments[duplicateSegment].id}"]`);
+    message = "Названия сегментов не должны повторяться.";
+  } else if (duplicateCriterion >= 0) {
+    input = root.querySelector(`[data-audience-criterion-name="${draft.criteria[duplicateCriterion].id}"]`);
+    message = "Критерии внутри одной группы не должны повторяться.";
+  }
+  if (input) {
+    input.setAttribute("aria-invalid", "true");
+    input.scrollIntoView({ behavior: "smooth", block: "center" });
+    input.focus({ preventScroll: true });
+    return message;
+  }
+  return "";
+}
+
+async function renderAudienceAnalysis(project) {
+  loader("Загружаю анализ аудитории…");
+  const analysisRef = doc(db, "projects", project.id, "audienceAnalyses", "main");
+  let snapshot;
+  try {
+    snapshot = await getDoc(analysisRef);
+  } catch (error) {
+    app.innerHTML = `<section class="screen flow-screen">${pageTopbar("К проекту")}<div class="flow-card card"><h1>Целевая аудитория</h1><div data-message><p class="error">${esc(readError(error))}</p></div></div></section>`;
+    bindTopbar(() => renderProjectWorkspace(project));
+    return;
+  }
+  const editable = canEdit(project.role);
+  let hasSavedAnalysis = snapshot.exists();
+  const draft = hasSavedAnalysis ? normalizeAudienceAnalysis(snapshot.data()) : blankAudienceAnalysis();
+
+  app.innerHTML = `
+    <section class="screen flow-screen audience-screen">
+      ${pageTopbar("К проекту")}
+      <header class="audience-page-heading">
+        <p class="step-indicator">Исследование аудитории</p>
+        <h1>Целевая аудитория</h1>
+        <p class="subtitle">Разделите аудиторию на сегменты и соберите для каждого демографические, поведенческие и другие характеристики.</p>
+      </header>
+      ${!hasSavedAnalysis && !editable ? `<div class="flow-card card activity-empty"><h2>Анализа пока нет</h2><p class="muted">Владелец или редактор проекта сможет создать сегменты аудитории.</p></div>` : `
+        <form class="audience-analysis-form" data-audience-form>
+          <section class="card audience-segment-card">
+            <div class="audience-section-heading">
+              <div><p class="step-indicator">01 · Сегменты</p><h2>Кого изучаем</h2><p class="muted">Один сегмент — одна однородная группа людей с общими признаками.</p></div>
+              ${editable ? `<button class="button ghost small" type="button" data-add-audience-segment>+ Сегмент</button>` : ""}
+            </div>
+            <div class="audience-segment-list" data-audience-segments></div>
+          </section>
+          <section class="card audience-matrix-card">
+            <div class="audience-section-heading">
+              <div><p class="step-indicator">02 · Критерии</p><h2>Портреты сегментов</h2><p class="muted">Базовые параметры можно изменить или удалить, а свои — добавить вручную.</p></div>
+              ${editable ? `<button class="button ghost small" type="button" data-add-audience-criterion>+ Критерий</button>` : ""}
+            </div>
+            <datalist id="audience-groups">${AUDIENCE_GROUPS.map((group) => `<option value="${esc(group.name)}"></option>`).join("")}<option value="Другое"></option></datalist>
+            <div class="audience-matrix-scroll" data-audience-matrix></div>
+            ${editable ? `<div class="audience-save-row"><span class="muted">До ${AUDIENCE_LIMITS.segments} сегментов и ${AUDIENCE_LIMITS.criteria} критериев</span><button class="button primary" type="submit">Сохранить анализ</button></div><div data-message></div>` : ""}
+          </section>
+        </form>`}
+    </section>`;
+  bindTopbar(() => renderProjectWorkspace(project));
+  if (!hasSavedAnalysis && !editable) return;
+
+  const form = document.querySelector("[data-audience-form]");
+  const drawSegments = () => {
+    const root = form.querySelector("[data-audience-segments]");
+    root.innerHTML = draft.segments.map((segment, index) => `<article class="audience-segment-item">
+      <span class="audience-segment-number">${String(index + 1).padStart(2, "0")}</span>
+      ${editable
+        ? `<label>Название сегмента<input data-audience-segment-name="${segment.id}" value="${esc(segment.name)}" maxlength="80" placeholder="Например, начинающие эксперты"></label>
+          <label>Короткое описание<textarea data-audience-segment-description="${segment.id}" maxlength="300" placeholder="Кто эти люди и что их объединяет">${esc(segment.description)}</textarea></label>
+          ${draft.segments.length > 1 ? `<button class="icon-button audience-remove" type="button" data-remove-audience-segment="${segment.id}" aria-label="Удалить сегмент ${esc(segment.name || index + 1)}">×</button>` : ""}`
+        : `<div><strong>${esc(segment.name)}</strong><p>${esc(segment.description) || '<span class="muted">Без описания</span>'}</p></div>`}
+    </article>`).join("");
+    root.querySelectorAll("input, textarea").forEach((input) => {
+      input.addEventListener("input", () => {
+        input.removeAttribute("aria-invalid");
+        syncAudienceDraft(draft, form);
+        if (input.matches("[data-audience-segment-name]")) {
+          form.querySelectorAll(`[data-audience-segment-label="${input.dataset.audienceSegmentName}"]`).forEach((label) => {
+            label.textContent = input.value || "Без названия";
+          });
+        }
+      });
+    });
+    root.querySelectorAll("[data-remove-audience-segment]").forEach((button) => {
+      button.onclick = () => {
+        syncAudienceDraft(draft, form);
+        const segmentId = button.dataset.removeAudienceSegment;
+        draft.segments = draft.segments.filter((segment) => segment.id !== segmentId);
+        draft.criteria.forEach((criterion) => delete criterion.values[segmentId]);
+        drawAll();
+      };
+    });
+  };
+  const drawMatrix = () => {
+    const root = form.querySelector("[data-audience-matrix]");
+    root.innerHTML = `<table class="audience-matrix" style="min-width:${390 + draft.segments.length * 300}px">
+      <thead><tr><th scope="col"><span class="audience-table-label">Группа и критерий</span></th>${draft.segments.map((segment) => `<th scope="col"><span data-audience-segment-label="${segment.id}">${esc(segment.name || "Без названия")}</span></th>`).join("")}</tr></thead>
+      <tbody>${draft.criteria.map((criterion, criterionIndex) => `<tr>
+        <th scope="row"><div class="audience-criterion-heading">
+          ${editable
+            ? `<input class="audience-group-input" list="audience-groups" data-audience-criterion-group="${criterion.id}" value="${esc(criterion.group)}" maxlength="80" aria-label="Группа критерия ${criterionIndex + 1}" placeholder="Группа">
+              <div class="audience-criterion-name"><input data-audience-criterion-name="${criterion.id}" value="${esc(criterion.name)}" maxlength="100" aria-label="Критерий ${criterionIndex + 1}" placeholder="Название критерия">${draft.criteria.length > 1 ? `<button class="icon-button" type="button" data-remove-audience-criterion="${criterion.id}" aria-label="Удалить критерий ${esc(criterion.name || criterionIndex + 1)}">×</button>` : ""}</div>`
+            : `<span class="audience-group-badge">${esc(criterion.group)}</span><strong>${esc(criterion.name)}</strong>`}
+        </div></th>
+        ${draft.segments.map((segment) => `<td>${editable
+          ? `<textarea data-audience-value data-criterion-id="${criterion.id}" data-segment-id="${segment.id}" maxlength="1200" aria-label="${esc(criterion.name || `Критерий ${criterionIndex + 1}`)}: ${esc(segment.name)}" placeholder="Факты, наблюдения, выводы…">${esc(criterion.values[segment.id])}</textarea>`
+          : `<p class="audience-value-readonly">${esc(criterion.values[segment.id]) || '<span class="muted">Не заполнено</span>'}</p>`}</td>`).join("")}
+      </tr>`).join("")}</tbody>
+    </table>`;
+    root.querySelectorAll("input, textarea").forEach((input) => input.addEventListener("input", () => {
+      input.removeAttribute("aria-invalid");
+      syncAudienceDraft(draft, form);
+    }));
+    root.querySelectorAll("[data-remove-audience-criterion]").forEach((button) => {
+      button.onclick = () => {
+        syncAudienceDraft(draft, form);
+        draft.criteria = draft.criteria.filter((criterion) => criterion.id !== button.dataset.removeAudienceCriterion);
+        drawMatrix();
+      };
+    });
+  };
+  const drawAll = () => {
+    drawSegments();
+    drawMatrix();
+  };
+
+  form.querySelector("[data-add-audience-segment]")?.addEventListener("click", () => {
+    if (draft.segments.length >= AUDIENCE_LIMITS.segments) {
+      showMessage(`Можно добавить не более ${AUDIENCE_LIMITS.segments} сегментов.`, "error", form);
+      return;
+    }
+    syncAudienceDraft(draft, form);
+    const segment = { id: audienceItemId("segment"), name: `Сегмент ${draft.segments.length + 1}`, description: "" };
+    draft.segments.push(segment);
+    draft.criteria.forEach((criterion) => { criterion.values[segment.id] = ""; });
+    drawAll();
+    form.querySelector(`[data-audience-segment-name="${segment.id}"]`)?.select();
+  });
+  form.querySelector("[data-add-audience-criterion]")?.addEventListener("click", () => {
+    if (draft.criteria.length >= AUDIENCE_LIMITS.criteria) {
+      showMessage(`Можно добавить не более ${AUDIENCE_LIMITS.criteria} критериев.`, "error", form);
+      return;
+    }
+    syncAudienceDraft(draft, form);
+    const criterion = {
+      id: audienceItemId("criterion"),
+      group: "Другое",
+      name: "",
+      values: Object.fromEntries(draft.segments.map((segment) => [segment.id, ""])),
+    };
+    draft.criteria.push(criterion);
+    drawMatrix();
+    form.querySelector(`[data-audience-criterion-name="${criterion.id}"]`)?.focus();
+  });
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    syncAudienceDraft(draft, form);
+    const validationMessage = validateAudienceDraft(draft, form);
+    if (validationMessage) {
+      showMessage(validationMessage, "error", form);
+      return;
+    }
+    const progress = beginFormProgress(form, "Сохраняю анализ…", 1);
+    if (!progress) return;
+    try {
+      const payload = {
+        segments: draft.segments.map((segment) => ({
+          id: segment.id,
+          name: segment.name.trim(),
+          description: segment.description.trim(),
+        })),
+        criteria: draft.criteria.map((criterion) => ({
+          id: criterion.id,
+          group: criterion.group.trim(),
+          name: criterion.name.trim(),
+          values: Object.fromEntries(draft.segments.map((segment) => [segment.id, criterion.values[segment.id].trim()])),
+        })),
+        updatedBy: user.uid,
+        updatedAt: serverTimestamp(),
+      };
+      if (!hasSavedAnalysis) payload.createdAt = serverTimestamp();
+      await setDoc(analysisRef, payload, { merge: true });
+      hasSavedAnalysis = true;
+      progress.advance("Анализ сохранён");
+      showMessage("Анализ целевой аудитории сохранён.", "success", form);
+    } catch (error) {
+      showMessage(readError(error), "error", form);
+    } finally {
+      progress.finish();
+    }
+  };
+  drawAll();
 }
 
 /* ---------------- Анализ конкурентов ---------------- */
@@ -1936,11 +2261,11 @@ async function deleteProject(project) {
   await updateDoc(projectRef, { deletingAt: serverTimestamp(), updatedAt: serverTimestamp() });
   try {
     const snapshots = [];
-    for (const subcollection of ["networks", "rubrics", "posts", "postImages", "comments", "competitorAnalyses", "activity"]) {
+    for (const subcollection of ["networks", "rubrics", "posts", "postImages", "comments", "audienceAnalyses", "competitorAnalyses", "activity"]) {
       try {
         snapshots.push(await getDocs(collection(db, "projects", project.id, subcollection)));
       } catch (error) {
-        if (["postImages", "competitorAnalyses", "activity"].includes(subcollection) && error?.code === "permission-denied") {
+        if (["postImages", "audienceAnalyses", "competitorAnalyses", "activity"].includes(subcollection) && error?.code === "permission-denied") {
           throw new Error("Firestore не разрешил удалить связанные данные. Опубликуйте актуальный файл firestore.rules в Firebase и повторите удаление.");
         }
         throw error;

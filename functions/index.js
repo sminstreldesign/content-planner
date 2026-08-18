@@ -71,6 +71,13 @@ const ENTITY_SPECS = {
     fields: ["companies", "criteria"],
     fieldLabels: { companies: "компании", criteria: "критерии и оценки" },
   },
+  audienceAnalysis: {
+    label: "анализ аудитории",
+    gender: "m",
+    name: () => "Сегменты целевой аудитории",
+    fields: ["segments", "criteria"],
+    fieldLabels: { segments: "сегменты", criteria: "критерии и портреты" },
+  },
   member: {
     label: "участник",
     gender: "m",
@@ -229,6 +236,7 @@ exports.auditPost = onDocumentWrittenWithAuthContext("projects/{projectId}/posts
 exports.auditImage = onDocumentWrittenWithAuthContext("projects/{projectId}/postImages/{entityId}", (event) => auditEntity(event, "image", event.params.entityId));
 exports.auditComment = onDocumentWrittenWithAuthContext("projects/{projectId}/comments/{entityId}", (event) => auditEntity(event, "comment", event.params.entityId));
 exports.auditCompetitorAnalysis = onDocumentWrittenWithAuthContext("projects/{projectId}/competitorAnalyses/{entityId}", (event) => auditEntity(event, "competitorAnalysis", event.params.entityId));
+exports.auditAudienceAnalysis = onDocumentWrittenWithAuthContext("projects/{projectId}/audienceAnalyses/{entityId}", (event) => auditEntity(event, "audienceAnalysis", event.params.entityId));
 exports.auditMembership = onDocumentWrittenWithAuthContext("memberships/{entityId}", async (event) => {
   if (!event.data) return;
   const sourceData = event.data.after.data() || event.data.before.data() || {};
