@@ -1066,6 +1066,7 @@ function renderProjectWorkspace(project) {
       number: "04",
       title: "Аудит",
       description: "Проверка текущих площадок и материалов",
+      available: true,
     },
     {
       key: "references",
@@ -1078,6 +1079,7 @@ function renderProjectWorkspace(project) {
       number: "06",
       title: "Блокнот",
       description: "Идеи, заметки и рабочие черновики",
+      available: true,
     },
   ];
 
@@ -1123,6 +1125,8 @@ function renderProjectWorkspace(project) {
   document.querySelector('[data-open-work-area="networks"]').onclick = () => renderNetworkSelection(project);
   document.querySelector('[data-open-work-area="audience"]').onclick = () => renderAudienceAnalysis(project);
   document.querySelector('[data-open-work-area="competitors"]').onclick = () => renderCompetitorAnalysis(project);
+  document.querySelector('[data-open-work-area="audit"]').onclick = () => renderProjectDocument(project, "audit");
+  document.querySelector('[data-open-work-area="notebook"]').onclick = () => renderProjectDocument(project, "notebook");
 }
 
 /* ---------------- Анализ целевой аудитории ---------------- */
@@ -1439,6 +1443,349 @@ async function renderAudienceAnalysis(project) {
       hasSavedAnalysis = true;
       progress.advance("Анализ сохранён");
       showMessage("Анализ целевой аудитории сохранён.", "success", form);
+    } catch (error) {
+      showMessage(readError(error), "error", form);
+    } finally {
+      progress.finish();
+    }
+  };
+  drawAll();
+}
+
+/* ---------------- Аудит и блокнот ---------------- */
+
+const PROJECT_DOCUMENT_CONFIG = {
+  audit: {
+    title: "Аудит",
+    kicker: "Разбор проекта",
+    description: "Фиксируйте состояние площадок, контента и процессов по отдельным главам.",
+    firstChapter: "Общая картина",
+  },
+  notebook: {
+    title: "Блокнот",
+    kicker: "Рабочие записи",
+    description: "Собирайте идеи, заметки и черновики в удобной структуре по главам.",
+    firstChapter: "Заметки",
+  },
+};
+const PROJECT_DOCUMENT_LIMITS = { chapters: 30, chapterHtml: 40000, totalHtml: 500000 };
+const EDITOR_FONTS = [
+  { label: "Georgia", value: "Georgia" },
+  { label: "Arial", value: "Arial" },
+  { label: "Helvetica", value: "Helvetica" },
+  { label: "Verdana", value: "Verdana" },
+  { label: "Tahoma", value: "Tahoma" },
+  { label: "Trebuchet", value: "Trebuchet MS" },
+  { label: "Times New Roman", value: "Times New Roman" },
+  { label: "Courier New", value: "Courier New" },
+  { label: "Garamond", value: "Garamond" },
+  { label: "Palatino", value: "Palatino Linotype" },
+];
+const EDITOR_SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 40, 48];
+const EDITOR_COLORS = [
+  "#342b25", "#5d4637", "#88915f", "#c68b72", "#000000",
+  "#374151", "#6b7280", "#991b1b", "#dc2626", "#ea580c",
+  "#d97706", "#ca8a04", "#4d7c0f", "#15803d", "#0f766e",
+  "#0369a1", "#2563eb", "#4338ca", "#7e22ce", "#be185d",
+];
+const RICH_TEXT_TAGS = new Set([
+  "P", "DIV", "BR", "H1", "H2", "H3", "H4", "SPAN", "STRONG", "EM", "U", "B", "I",
+  "UL", "OL", "LI", "BLOCKQUOTE",
+]);
+
+function projectDocumentItemId() {
+  const randomPart = globalThis.crypto?.randomUUID?.().replaceAll("-", "")
+    || `${Date.now()}${Math.random().toString(16).slice(2)}`;
+  return `chapter_${randomPart}`;
+}
+
+function blankProjectDocument(kind) {
+  return {
+    kind,
+    chapters: [{ id: projectDocumentItemId(), title: PROJECT_DOCUMENT_CONFIG[kind].firstChapter, html: "" }],
+  };
+}
+
+function normalizeCssColor(value) {
+  const color = String(value || "").trim().toLowerCase();
+  if (/^#[0-9a-f]{3,6}$/.test(color)) return color;
+  if (/^rgba?\([\d\s.,%]+\)$/.test(color)) return color;
+  return "";
+}
+
+function sanitizeRichText(html = "") {
+  const parsed = new DOMParser().parseFromString(String(html), "text/html");
+  [...parsed.body.querySelectorAll("*")].reverse().forEach((element) => {
+    if (!RICH_TEXT_TAGS.has(element.tagName)) {
+      element.replaceWith(...element.childNodes);
+      return;
+    }
+    const safeStyles = {};
+    const fontFamily = element.style.fontFamily.replaceAll(/["']/g, "").trim();
+    if (EDITOR_FONTS.some((font) => font.value.toLocaleLowerCase("en-US") === fontFamily.toLocaleLowerCase("en-US"))) {
+      safeStyles.fontFamily = fontFamily;
+    }
+    const size = Number.parseInt(element.style.fontSize, 10);
+    if (EDITOR_SIZES.includes(size)) safeStyles.fontSize = `${size}px`;
+    const color = normalizeCssColor(element.style.color);
+    if (color) safeStyles.color = color;
+    if (["left", "center", "right", "justify"].includes(element.style.textAlign)) safeStyles.textAlign = element.style.textAlign;
+    if (["bold", "700"].includes(element.style.fontWeight)) safeStyles.fontWeight = "bold";
+    if (element.style.fontStyle === "italic") safeStyles.fontStyle = "italic";
+    if (element.style.textDecorationLine === "underline" || element.style.textDecoration.includes("underline")) {
+      safeStyles.textDecoration = "underline";
+    }
+    [...element.attributes].forEach((attribute) => element.removeAttribute(attribute.name));
+    Object.assign(element.style, safeStyles);
+  });
+  return parsed.body.innerHTML;
+}
+
+function setSanitizedRichText(element, html) {
+  const parsed = new DOMParser().parseFromString(sanitizeRichText(html), "text/html");
+  element.replaceChildren(...[...parsed.body.childNodes].map((node) => document.importNode(node, true)));
+}
+
+function normalizeProjectDocument(data, kind) {
+  if (!data || !Array.isArray(data.chapters)) return blankProjectDocument(kind);
+  const seenIds = new Set();
+  const chapters = data.chapters.slice(0, PROJECT_DOCUMENT_LIMITS.chapters).map((chapter) => {
+    const storedId = typeof chapter?.id === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(chapter.id)
+      ? chapter.id
+      : projectDocumentItemId();
+    const id = seenIds.has(storedId) ? projectDocumentItemId() : storedId;
+    seenIds.add(id);
+    return {
+      id,
+      title: String(chapter?.title || "").slice(0, 100),
+      html: sanitizeRichText(chapter?.html || ""),
+    };
+  });
+  if (!chapters.length) return blankProjectDocument(kind);
+  return { kind, chapters };
+}
+
+function projectDocumentToolbarMarkup() {
+  return `<div class="rich-toolbar" data-rich-toolbar role="toolbar" aria-label="Форматирование текста">
+    <label class="rich-toolbar-field"><span>Шрифт</span><select data-rich-font>${EDITOR_FONTS.map((font) => `<option value="${esc(font.value)}">${esc(font.label)}</option>`).join("")}</select></label>
+    <label class="rich-toolbar-field rich-toolbar-size"><span>Размер</span><select data-rich-size>${EDITOR_SIZES.map((size) => `<option value="${size}"${size === 16 ? " selected" : ""}>${size}</option>`).join("")}</select></label>
+    <label class="rich-toolbar-field"><span>Стиль</span><select data-rich-block><option value="p">Обычный текст</option><option value="h1">Заголовок 1</option><option value="h2">Заголовок 2</option><option value="h3">Заголовок 3</option><option value="h4">Заголовок 4</option><option value="blockquote">Цитата</option></select></label>
+    <div class="rich-toolbar-buttons" aria-label="Начертание">
+      <button type="button" data-rich-command="bold" aria-label="Полужирный"><strong>Ж</strong></button>
+      <button type="button" data-rich-command="italic" aria-label="Курсив"><em>К</em></button>
+      <button type="button" data-rich-command="underline" aria-label="Подчёркнутый"><u>Ч</u></button>
+      <button type="button" data-rich-command="insertUnorderedList" aria-label="Маркированный список">• ≡</button>
+      <button type="button" data-rich-command="insertOrderedList" aria-label="Нумерованный список">1. ≡</button>
+    </div>
+    <fieldset class="rich-color-field"><legend>Цвет текста</legend><div class="rich-color-palette">${EDITOR_COLORS.map((color, index) => `<button type="button" data-rich-color="${color}" style="--swatch:${color}" aria-label="Цвет ${index + 1}: ${color}" title="${color}"></button>`).join("")}</div></fieldset>
+  </div>`;
+}
+
+function bindRichTextToolbar(editor, root, onInput) {
+  let savedRange = null;
+  const rememberSelection = () => {
+    const selection = window.getSelection();
+    if (!selection?.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    if (editor.contains(range.commonAncestorContainer)) savedRange = range.cloneRange();
+  };
+  const restoreSelection = () => {
+    if (!savedRange) return;
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(savedRange);
+  };
+  const run = (command, value = null) => {
+    editor.focus();
+    restoreSelection();
+    document.execCommand("styleWithCSS", false, true);
+    document.execCommand(command, false, value);
+    rememberSelection();
+    onInput();
+  };
+  ["keyup", "mouseup", "input", "focus"].forEach((eventName) => editor.addEventListener(eventName, rememberSelection));
+  editor.addEventListener("input", onInput);
+  editor.addEventListener("paste", (event) => {
+    event.preventDefault();
+    const clipboard = event.clipboardData;
+    const html = clipboard?.getData("text/html");
+    const text = clipboard?.getData("text/plain") || "";
+    document.execCommand(html ? "insertHTML" : "insertText", false, html ? sanitizeRichText(html) : text);
+    rememberSelection();
+    onInput();
+  });
+  editor.addEventListener("drop", (event) => event.preventDefault());
+  root.querySelectorAll("button").forEach((button) => button.addEventListener("mousedown", (event) => event.preventDefault()));
+  root.querySelectorAll("[data-rich-command]").forEach((button) => {
+    button.onclick = () => run(button.dataset.richCommand);
+  });
+  root.querySelector("[data-rich-font]").onchange = (event) => run("fontName", event.target.value);
+  root.querySelector("[data-rich-block]").onchange = (event) => run("formatBlock", event.target.value);
+  root.querySelector("[data-rich-size]").onchange = (event) => {
+    const size = Number(event.target.value);
+    run("fontSize", "7");
+    editor.querySelectorAll('font[size="7"]').forEach((font) => {
+      const span = document.createElement("span");
+      span.style.fontSize = `${size}px`;
+      span.replaceChildren(...font.childNodes);
+      font.replaceWith(span);
+    });
+    editor.querySelectorAll("span").forEach((span) => {
+      if (["xxx-large", "-webkit-xxx-large"].includes(span.style.fontSize)) span.style.fontSize = `${size}px`;
+    });
+    onInput();
+  };
+  root.querySelectorAll("[data-rich-color]").forEach((button) => {
+    button.onclick = () => run("foreColor", button.dataset.richColor);
+  });
+}
+
+function validateProjectDocument(draft, root) {
+  const titles = draft.chapters.map((chapter) => chapter.title.trim());
+  const normalized = titles.map((title) => title.toLocaleLowerCase("ru-RU"));
+  const emptyIndex = titles.findIndex((title) => !title);
+  const duplicateIndex = normalized.findIndex((title, index) => title && normalized.indexOf(title) !== index);
+  const oversizedIndex = draft.chapters.findIndex((chapter) => chapter.html.length > PROJECT_DOCUMENT_LIMITS.chapterHtml);
+  const totalHtml = draft.chapters.reduce((total, chapter) => total + chapter.html.length, 0);
+  let message = "";
+  if (emptyIndex >= 0) message = "Назовите каждую главу.";
+  else if (duplicateIndex >= 0) message = "Названия глав не должны повторяться.";
+  else if (oversizedIndex >= 0) message = "Одна из глав слишком большая. Разделите её на несколько глав.";
+  else if (totalHtml > PROJECT_DOCUMENT_LIMITS.totalHtml) message = "Документ слишком большой. Сократите текст или разделите его между проектами.";
+  if (message) {
+    const invalidIndex = emptyIndex >= 0 ? emptyIndex : duplicateIndex >= 0 ? duplicateIndex : oversizedIndex;
+    const chapter = draft.chapters[invalidIndex];
+    const target = chapter ? root.querySelector(`[data-document-chapter="${chapter.id}"]`) : null;
+    target?.focus();
+    target?.setAttribute("aria-invalid", "true");
+  }
+  return message;
+}
+
+async function renderProjectDocument(project, kind) {
+  const config = PROJECT_DOCUMENT_CONFIG[kind];
+  if (!config) return;
+  loader(`Загружаю раздел «${config.title}»…`);
+  const documentRef = doc(db, "projects", project.id, "projectDocuments", kind);
+  let snapshot;
+  try {
+    snapshot = await getDoc(documentRef);
+  } catch (error) {
+    app.innerHTML = `<section class="screen flow-screen">${pageTopbar("К проекту")}<div class="flow-card card"><h1>${esc(config.title)}</h1><div data-message><p class="error">${esc(readError(error))}</p></div></div></section>`;
+    bindTopbar(() => renderProjectWorkspace(project));
+    return;
+  }
+  const editable = canEdit(project.role);
+  let hasSavedDocument = snapshot.exists();
+  const draft = hasSavedDocument ? normalizeProjectDocument(snapshot.data(), kind) : blankProjectDocument(kind);
+  let selectedChapterId = draft.chapters[0].id;
+
+  app.innerHTML = `<section class="screen flow-screen project-document-screen">
+    ${pageTopbar("К проекту")}
+    <header class="project-document-page-heading"><p class="step-indicator">${esc(config.kicker)}</p><h1>${esc(config.title)}</h1><p class="subtitle">${esc(config.description)}</p></header>
+    ${!hasSavedDocument && !editable ? `<div class="flow-card card activity-empty"><h2>Здесь пока пусто</h2><p class="muted">Владелец или редактор проекта сможет добавить главы и текст.</p></div>` : `
+      <form class="project-document-form card" data-project-document-form>
+        <aside class="document-chapters-panel">
+          <div class="document-chapters-heading"><span>Главы</span><small data-chapter-count></small></div>
+          <nav class="document-chapter-list" data-document-chapters aria-label="Главы документа"></nav>
+          ${editable ? `<button class="button ghost small document-add-chapter" type="button" data-add-document-chapter>+ Добавить главу</button>` : ""}
+        </aside>
+        <section class="document-editor-panel" data-document-editor-panel></section>
+      </form>`}
+  </section>`;
+  bindTopbar(() => renderProjectWorkspace(project));
+  if (!hasSavedDocument && !editable) return;
+
+  const form = document.querySelector("[data-project-document-form]");
+  const syncSelectedChapter = () => {
+    const chapter = draft.chapters.find((item) => item.id === selectedChapterId);
+    if (!chapter) return;
+    const titleInput = form.querySelector("[data-active-chapter-title]");
+    const editor = form.querySelector("[data-rich-editor]");
+    if (titleInput) chapter.title = titleInput.value;
+    if (editor) chapter.html = sanitizeRichText(editor.innerHTML);
+  };
+  const drawChapterList = () => {
+    const root = form.querySelector("[data-document-chapters]");
+    form.querySelector("[data-chapter-count]").textContent = `${draft.chapters.length} из ${PROJECT_DOCUMENT_LIMITS.chapters}`;
+    root.innerHTML = draft.chapters.map((chapter, index) => `<button class="document-chapter-button${chapter.id === selectedChapterId ? " active" : ""}" type="button" data-document-chapter="${chapter.id}"><span>${String(index + 1).padStart(2, "0")}</span><strong>${esc(chapter.title || "Без названия")}</strong></button>`).join("");
+    root.querySelectorAll("[data-document-chapter]").forEach((button) => {
+      button.onclick = () => {
+        if (button.dataset.documentChapter === selectedChapterId) return;
+        syncSelectedChapter();
+        selectedChapterId = button.dataset.documentChapter;
+        drawAll();
+      };
+    });
+  };
+  const drawEditor = () => {
+    const chapter = draft.chapters.find((item) => item.id === selectedChapterId);
+    const root = form.querySelector("[data-document-editor-panel]");
+    root.innerHTML = editable ? `
+      <div class="document-editor-heading"><label>Название главы<input data-active-chapter-title maxlength="100" value="${esc(chapter.title)}" placeholder="Название главы"></label>${draft.chapters.length > 1 ? `<button class="button ghost small" type="button" data-delete-document-chapter>Удалить главу</button>` : ""}</div>
+      ${projectDocumentToolbarMarkup()}
+      <div class="rich-editor" data-rich-editor contenteditable="true" role="textbox" aria-multiline="true" aria-label="Текст главы ${esc(chapter.title)}" data-placeholder="Начните писать…"></div>
+      <div class="document-save-row"><span class="muted">Изменения сохраняются для всей команды</span><button class="button primary" type="submit">Сохранить</button></div><div data-message></div>` : `
+      <div class="document-editor-heading"><div><p class="step-indicator">Выбранная глава</p><h2>${esc(chapter.title)}</h2></div></div>
+      <article class="rich-editor rich-editor-readonly" data-rich-editor aria-label="Текст главы ${esc(chapter.title)}"></article>`;
+    const editor = root.querySelector("[data-rich-editor]");
+    setSanitizedRichText(editor, chapter.html);
+    if (!editable) return;
+    const titleInput = root.querySelector("[data-active-chapter-title]");
+    titleInput.addEventListener("input", () => {
+      titleInput.removeAttribute("aria-invalid");
+      chapter.title = titleInput.value;
+      const listLabel = form.querySelector(`[data-document-chapter="${chapter.id}"] strong`);
+      if (listLabel) listLabel.textContent = titleInput.value || "Без названия";
+    });
+    bindRichTextToolbar(editor, root.querySelector("[data-rich-toolbar]"), () => {
+      chapter.html = sanitizeRichText(editor.innerHTML);
+    });
+    root.querySelector("[data-delete-document-chapter]")?.addEventListener("click", () => {
+      draft.chapters = draft.chapters.filter((item) => item.id !== selectedChapterId);
+      selectedChapterId = draft.chapters[0].id;
+      drawAll();
+    });
+  };
+  const drawAll = () => {
+    drawChapterList();
+    drawEditor();
+  };
+
+  form.querySelector("[data-add-document-chapter]")?.addEventListener("click", () => {
+    if (draft.chapters.length >= PROJECT_DOCUMENT_LIMITS.chapters) {
+      showMessage(`Можно добавить не более ${PROJECT_DOCUMENT_LIMITS.chapters} глав.`, "error", form);
+      return;
+    }
+    syncSelectedChapter();
+    const chapter = { id: projectDocumentItemId(), title: `Глава ${draft.chapters.length + 1}`, html: "" };
+    draft.chapters.push(chapter);
+    selectedChapterId = chapter.id;
+    drawAll();
+    form.querySelector("[data-active-chapter-title]")?.select();
+  });
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    syncSelectedChapter();
+    const validationMessage = validateProjectDocument(draft, form);
+    if (validationMessage) {
+      showMessage(validationMessage, "error", form);
+      return;
+    }
+    const progress = beginFormProgress(form, "Сохраняю документ…", 1);
+    if (!progress) return;
+    try {
+      const payload = {
+        kind,
+        chapters: draft.chapters.map((chapter) => ({ id: chapter.id, title: chapter.title.trim(), html: sanitizeRichText(chapter.html) })),
+        updatedBy: user.uid,
+        updatedAt: serverTimestamp(),
+      };
+      if (!hasSavedDocument) payload.createdAt = serverTimestamp();
+      await setDoc(documentRef, payload, { merge: true });
+      hasSavedDocument = true;
+      progress.advance("Документ сохранён");
+      showMessage(`${config.title} сохранён.`, "success", form);
     } catch (error) {
       showMessage(readError(error), "error", form);
     } finally {
@@ -2261,11 +2608,11 @@ async function deleteProject(project) {
   await updateDoc(projectRef, { deletingAt: serverTimestamp(), updatedAt: serverTimestamp() });
   try {
     const snapshots = [];
-    for (const subcollection of ["networks", "rubrics", "posts", "postImages", "comments", "audienceAnalyses", "competitorAnalyses", "activity"]) {
+    for (const subcollection of ["networks", "rubrics", "posts", "postImages", "comments", "audienceAnalyses", "competitorAnalyses", "projectDocuments", "activity"]) {
       try {
         snapshots.push(await getDocs(collection(db, "projects", project.id, subcollection)));
       } catch (error) {
-        if (["postImages", "audienceAnalyses", "competitorAnalyses", "activity"].includes(subcollection) && error?.code === "permission-denied") {
+        if (["postImages", "audienceAnalyses", "competitorAnalyses", "projectDocuments", "activity"].includes(subcollection) && error?.code === "permission-denied") {
           throw new Error("Firestore не разрешил удалить связанные данные. Опубликуйте актуальный файл firestore.rules в Firebase и повторите удаление.");
         }
         throw error;

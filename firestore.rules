@@ -128,6 +128,29 @@ service cloud.firestore {
           && get(/databases/$(database)/documents/projects/$(projectId)).data.keys().hasAny(['deletingAt'])
           && get(/databases/$(database)/documents/projects/$(projectId)).data.deletingAt is timestamp;
       }
+      match /projectDocuments/{documentId} {
+        function validDocument() {
+          return documentId in ['audit', 'notebook']
+            && request.resource.data.kind == documentId
+            && request.resource.data.chapters is list
+            && request.resource.data.chapters.size() >= 1
+            && request.resource.data.chapters.size() <= 30
+            && request.resource.data.updatedBy == request.auth.uid
+            && request.resource.data.updatedAt is timestamp;
+        }
+        allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
+        allow create: if hasRole(projectId, ['owner','editor'])
+          && request.resource.data.keys().hasAll(['kind', 'chapters', 'updatedBy', 'createdAt', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['kind', 'chapters', 'updatedBy', 'createdAt', 'updatedAt'])
+          && request.resource.data.createdAt is timestamp
+          && validDocument();
+        allow update: if hasRole(projectId, ['owner','editor'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['chapters', 'updatedBy', 'updatedAt'])
+          && validDocument();
+        allow delete: if isOwner(projectId)
+          && get(/databases/$(database)/documents/projects/$(projectId)).data.keys().hasAny(['deletingAt'])
+          && get(/databases/$(database)/documents/projects/$(projectId)).data.deletingAt is timestamp;
+      }
       match /activity/{activityId} {
         allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
         allow create, update: if false;
