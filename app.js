@@ -603,7 +603,7 @@ function renderLanding() {
             ${landingOllieMarkup("hero")}
             <div class="landing-preview-window landing-preview-window-hero">
               <div class="landing-window-bar"><span></span><span></span><span></span><small>Мои проекты</small></div>
-              <img src="assets/screen-projects.png?v=3" alt="Главный экран Контент-плана со списком проектов и Олли" width="1258" height="631">
+              <img src="assets/screen-projects.png?v=4" alt="Главный экран Контент-плана со списком проектов и Олли" width="1258" height="631">
             </div>
           </div>
         </section>
@@ -632,7 +632,7 @@ function renderLanding() {
               <div class="landing-preview-window">
                 <div class="landing-window-bar"><span></span><span></span><span></span><small>Проекты</small></div>
                 <div class="landing-feature-screen">
-                  <img src="assets/screen-projects.png?v=3" alt="Реальный главный экран Контент-плана" loading="lazy" width="1258" height="631">
+                  <img src="assets/screen-projects.png?v=4" alt="Реальный главный экран Контент-плана" loading="lazy" width="1258" height="631">
                   ${landingOllieMarkup("peek")}
                 </div>
               </div>
