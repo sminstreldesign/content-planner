@@ -252,17 +252,25 @@ textarea { min-height: 105px; resize: vertical; }
 
 /* Выбор соцсети */
 .network-select-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin: 30px 0; }
-.network-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 18px; }
-.network-card { min-height: 135px; border: 0; border-radius: 25px; padding: 22px; background: var(--surface); box-shadow: 0 12px 28px rgba(var(--text-rgb), .12); text-align: left; }
-.network-card span { display: block; margin-top: 26px; opacity: 0.72; font-size: 0.9rem; }
-.network-card:hover { background: var(--secondary); color: var(--surface); }
+.network-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
+.network-card { display: grid; min-height: 190px; overflow: hidden; border-radius: 25px; background: var(--surface); box-shadow: 0 12px 28px rgba(var(--text-rgb), .12); }
+.network-card-open { display: grid; align-content: space-between; min-height: 120px; border: 0; padding: 22px; background: transparent; text-align: left; }
+.network-card-open span { display: block; margin-top: 26px; opacity: 0.72; font-size: 0.9rem; }
+.network-card-open:hover { background: var(--secondary); color: var(--surface); }
+.network-assignee, .network-assignee-summary { padding: 14px 22px 20px; border-top: 1px solid var(--line); }
+.network-assignee { font-size: .9rem; }
+.network-assignee select { padding: 9px 11px; }
+.network-assignee-summary { display: grid; gap: 4px; }
+.network-assignee-summary small { opacity: .68; }
 
 /* Доступ */
 .code-box { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 20px 0 28px; padding: 17px; border-radius: 17px; background: rgba(var(--accent-rgb), .22); }
 .code { font-size: 1.3rem; font-weight: 700; letter-spacing: 0.15em; }
 .member-list { display: grid; gap: 9px; }
-.member-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(280px, auto); gap: 14px; align-items: center; padding: 13px; border-bottom: 1px solid var(--line); }
+.member-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(430px, auto); gap: 14px; align-items: center; padding: 13px; border-bottom: 1px solid var(--line); }
 .member-actions { display: flex; justify-content: flex-end; align-items: center; gap: 9px; flex-wrap: wrap; }
+.member-specialty-field { min-width: 210px; flex: 1 1 240px; gap: 4px; font-size: .82rem; }
+.member-specialty { font-size: 1rem; }
 .member-actions select { min-width: 150px; }
 .member-email { font-size: 0.86rem; opacity: 0.68; }
 
@@ -300,6 +308,7 @@ textarea { min-height: 105px; resize: vertical; }
 .modal.medium { width: min(100%, 720px); }
 .close { position: absolute; top: 12px; right: 14px; border: 0; background: transparent; font-size: 1.9rem; }
 .post-editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 20px; }
+.post-meta-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .post-form-toolbar { position: sticky; top: -28px; z-index: 5; display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: -12px -10px 4px; padding: 12px 10px; border-bottom: 1px solid var(--line); background: rgba(var(--surface-rgb), .96); backdrop-filter: blur(8px); }
 .post-form-toolbar span { color: var(--secondary); font-size: .92rem; }
 .editor-column { display: grid; align-content: start; gap: 14px; padding: 18px; border-radius: 18px; background: rgba(var(--secondary-rgb), .16); }

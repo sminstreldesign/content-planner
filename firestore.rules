@@ -15,6 +15,20 @@ service cloud.firestore {
     function createdProjectOwner(projectId) {
       return signedIn() && get(/databases/$(database)/documents/projects/$(projectId)).data.ownerId == request.auth.uid;
     }
+    function validAssignee(projectId) {
+      return request.resource.data.keys().hasAll(['assigneeId', 'assigneeName'])
+        && request.resource.data.assigneeId is string
+        && request.resource.data.assigneeId.size() <= 128
+        && request.resource.data.assigneeName is string
+        && request.resource.data.assigneeName.size() <= 120
+        && (
+          (request.resource.data.assigneeId == '' && request.resource.data.assigneeName == '')
+          || (request.resource.data.assigneeId != ''
+            && exists(/databases/$(database)/documents/memberships/$(projectId + '_' + request.resource.data.assigneeId))
+            && get(/databases/$(database)/documents/memberships/$(projectId + '_' + request.resource.data.assigneeId)).data.projectId == projectId
+            && get(/databases/$(database)/documents/memberships/$(projectId + '_' + request.resource.data.assigneeId)).data.userId == request.resource.data.assigneeId)
+        );
+    }
 
     match /profiles/{userId} {
       allow create: if authenticated() && request.auth.uid == userId;
@@ -29,7 +43,11 @@ service cloud.firestore {
 
       match /networks/{networkId} {
         allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
-        allow create, update, delete: if hasRole(projectId, ['owner','editor']);
+        allow create: if hasRole(projectId, ['owner','editor'])
+          && (!request.resource.data.keys().hasAny(['assigneeId', 'assigneeName']) || validAssignee(projectId));
+        allow update: if hasRole(projectId, ['owner','editor'])
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['assigneeId', 'assigneeName']) || validAssignee(projectId));
+        allow delete: if hasRole(projectId, ['owner','editor']);
       }
       match /rubrics/{rubricId} {
         allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
@@ -37,7 +55,11 @@ service cloud.firestore {
       }
       match /posts/{postId} {
         allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
-        allow create, update, delete: if hasRole(projectId, ['owner','editor']);
+        allow create: if hasRole(projectId, ['owner','editor'])
+          && (!request.resource.data.keys().hasAny(['assigneeId', 'assigneeName']) || validAssignee(projectId));
+        allow update: if hasRole(projectId, ['owner','editor'])
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['assigneeId', 'assigneeName']) || validAssignee(projectId));
+        allow delete: if hasRole(projectId, ['owner','editor']);
       }
       match /postImages/{imageId} {
         allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
@@ -67,7 +89,10 @@ service cloud.firestore {
       allow delete: if signedIn() && isOwner(resource.data.projectId);
     }
     match /memberships/{membershipId} {
-      allow read: if signedIn() && (resource.data.userId == request.auth.uid || isOwner(resource.data.projectId));
+      allow read: if signedIn() && (
+        resource.data.userId == request.auth.uid
+        || hasRole(resource.data.projectId, ['owner','editor'])
+      );
       allow create: if signedIn() && (
         (request.resource.data.userId == request.auth.uid &&
          get(/databases/$(database)/documents/invitations/$(request.resource.data.inviteCode)).data.active == true &&
@@ -75,12 +100,21 @@ service cloud.firestore {
          request.resource.data.role == 'viewer')
         || isOwner(request.resource.data.projectId)
         || (request.resource.data.userId == request.auth.uid && createdProjectOwner(request.resource.data.projectId))
+      ) && (
+        !request.resource.data.keys().hasAny(['specialty'])
+        || (request.resource.data.specialty is string && request.resource.data.specialty.size() <= 100)
       );
       allow update: if signedIn()
         && isOwner(resource.data.projectId)
-        && resource.data.role != 'owner'
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
-        && request.resource.data.role in ['viewer', 'editor'];
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'specialty'])
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['specialty'])
+          || (request.resource.data.specialty is string && request.resource.data.specialty.size() <= 100)
+        )
+        && (
+          (resource.data.role == 'owner' && request.resource.data.role == 'owner')
+          || (resource.data.role != 'owner' && request.resource.data.role in ['viewer', 'editor'])
+        );
       allow delete: if signedIn() && (
         (isOwner(resource.data.projectId) && resource.data.role != 'owner')
         || (resource.data.role == 'owner'

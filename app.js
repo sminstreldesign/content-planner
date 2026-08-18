@@ -1194,6 +1194,35 @@ async function getRubrics(projectId) {
   return snapshot.docs.map((item) => ({ id: item.id, ...item.data() })).sort((a, b) => a.name.localeCompare(b.name, "ru"));
 }
 
+async function getProjectMembers(projectId) {
+  const snapshot = await getDocs(query(collection(db, "memberships"), where("projectId", "==", projectId)));
+  return snapshot.docs
+    .map((item) => ({ id: item.id, ...item.data(), role: normalizeRole(item.data().role) }))
+    .sort((a, b) => {
+      if (a.role === "owner" && b.role !== "owner") return -1;
+      if (b.role === "owner" && a.role !== "owner") return 1;
+      return memberDisplayName(a).localeCompare(memberDisplayName(b), "ru");
+    });
+}
+
+function memberDisplayName(member) {
+  return member.userName || member.userEmail || "Участник";
+}
+
+function assigneeOptions(members, selectedId = "", selectedName = "") {
+  const hasSelectedMember = members.some((member) => member.userId === selectedId);
+  const unavailableOption = selectedId && !hasSelectedMember
+    ? `<option value="${esc(selectedId)}" selected>${esc(selectedName || "Участник больше не подключён")}</option>`
+    : "";
+  return `<option value="" ${selectedId ? "" : "selected"}>Не назначен</option>
+    ${unavailableOption}
+    ${members.map((member) => {
+      const name = memberDisplayName(member);
+      const label = member.specialty ? `${name} — ${member.specialty}` : name;
+      return `<option value="${esc(member.userId)}" ${member.userId === selectedId ? "selected" : ""}>${esc(label)}</option>`;
+    }).join("")}`;
+}
+
 async function renderRubricSetup(project, options = {}) {
   loader();
   const networks = await getNetworks(project.id);
@@ -1432,7 +1461,10 @@ async function renderNetworkSettings(project) {
 
 async function renderNetworkSelection(project) {
   loader();
-  const networks = await getNetworks(project.id);
+  const [networks, members] = await Promise.all([
+    getNetworks(project.id),
+    canEdit(project.role) ? getProjectMembers(project.id) : Promise.resolve([]),
+  ]);
   app.innerHTML = `
     <section class="screen flow-screen">
       ${pageTopbar("Все проекты")}
@@ -1440,13 +1472,42 @@ async function renderNetworkSelection(project) {
         <div><h1>${esc(project.name)}</h1><p class="subtitle">Выберите соцсеть, чтобы открыть её контент-план.</p></div>
         ${project.role === "owner" ? '<div class="plan-tools"><button class="button ghost" data-network-settings>Соцсети</button><button class="button" data-access>Доступ</button></div>' : ""}
       </div>
+      <div data-message></div>
       <div class="network-grid">
-        ${networks.map((network) => `<button class="network-card" data-open-plan="${network.id}"><strong>${esc(network.name)}</strong><span>Открыть контент-план в новой вкладке →</span></button>`).join("") || '<div class="card flow-card"><p>В проекте пока нет соцсетей.</p></div>'}
+        ${networks.map((network) => `<article class="network-card">
+          <button class="network-card-open" data-open-plan="${network.id}"><strong>${esc(network.name)}</strong><span>Открыть контент-план в новой вкладке →</span></button>
+          ${canEdit(project.role)
+            ? `<label class="network-assignee">Ответственный
+                <select data-network-assignee="${network.id}">${assigneeOptions(members, network.assigneeId, network.assigneeName)}</select>
+              </label>`
+            : `<div class="network-assignee-summary"><small>Ответственный</small><strong>${esc(network.assigneeName || "Не назначен")}</strong></div>`}
+        </article>`).join("") || '<div class="card flow-card"><p>В проекте пока нет соцсетей.</p></div>'}
       </div>
     </section>`;
   bindTopbar(renderDashboard);
   document.querySelector("[data-network-settings]")?.addEventListener("click", () => renderNetworkSettings(project));
   document.querySelector("[data-access]")?.addEventListener("click", () => renderAccess(project));
+  document.querySelectorAll("[data-network-assignee]").forEach((select) => {
+    let savedAssigneeId = select.value;
+    select.onchange = async () => {
+      const selectedMember = members.find((member) => member.userId === select.value);
+      select.disabled = true;
+      try {
+        await updateDoc(doc(db, "projects", project.id, "networks", select.dataset.networkAssignee), {
+          assigneeId: selectedMember?.userId || "",
+          assigneeName: selectedMember ? memberDisplayName(selectedMember) : "",
+          updatedAt: serverTimestamp(),
+        });
+        savedAssigneeId = select.value;
+        showMessage("Ответственный за соцсеть обновлён.", "success");
+      } catch (error) {
+        select.value = savedAssigneeId;
+        showMessage(readError(error));
+      } finally {
+        select.disabled = false;
+      }
+    };
+  });
   document.querySelectorAll("[data-open-plan]").forEach((button) => {
     button.onclick = () => {
       const url = new URL(window.location.href);
@@ -1573,6 +1634,9 @@ async function renderAccess(project) {
             return `<div class="member-row">
               <div><strong>${esc(name || "Участник")}</strong>${email ? `<div class="member-email">${esc(email)}</div>` : ""}</div>
               <div class="member-actions">
+                <label class="member-specialty-field"><span>Функция в проекте</span>
+                  <input class="member-specialty" data-member-specialty="${esc(member.id)}" value="${esc(member.specialty || "")}" maxlength="100" placeholder="Дизайнер, художник…" aria-label="Функция участника ${esc(name || "Участник")}">
+                </label>
                 <select data-member-role="${esc(member.id)}" ${isOwner ? "disabled" : ""}>
                   ${(isOwner ? ["owner"] : ["viewer", "editor"]).map((role) => `<option value="${role}" ${member.role === role ? "selected" : ""}>${roleLabel(role)}</option>`).join("")}
                 </select>
@@ -1596,6 +1660,24 @@ async function renderAccess(project) {
         showMessage("Роль участника обновлена.", "success");
       } catch (error) {
         showMessage(readError(error));
+      }
+    };
+  });
+  document.querySelectorAll("[data-member-specialty]").forEach((input) => {
+    let savedSpecialty = input.value;
+    input.onchange = async () => {
+      const specialty = input.value.trim();
+      input.disabled = true;
+      try {
+        await updateDoc(doc(db, "memberships", input.dataset.memberSpecialty), { specialty });
+        input.value = specialty;
+        savedSpecialty = specialty;
+        showMessage("Функция участника обновлена.", "success");
+      } catch (error) {
+        input.value = savedSpecialty;
+        showMessage(readError(error));
+      } finally {
+        input.disabled = false;
       }
     };
   });
@@ -1732,6 +1814,7 @@ function openImageViewer(url, label) {
 async function openPostEditor({ project, network, rubric, date, post }) {
   const editable = canEdit(project.role);
   const commentable = canComment(project.role);
+  const members = editable ? await getProjectMembers(project.id) : [];
   let comments = [];
   let postImages = [];
   if (post) {
@@ -1752,6 +1835,12 @@ async function openPostEditor({ project, network, rubric, date, post }) {
     ...normalizeImageList(post?.visualImages, post?.visual).map((url) => ({ id: "", url })),
   ];
   let currentImageCount = referenceImages.length + visualImages.length;
+  const postHasAssignee = post && Object.prototype.hasOwnProperty.call(post, "assigneeId");
+  const networkAssigneeIsAvailable = editable
+    ? members.some((member) => member.userId === network.assigneeId)
+    : Boolean(network.assigneeId);
+  const selectedAssigneeId = postHasAssignee ? post.assigneeId : (networkAssigneeIsAvailable ? network.assigneeId : "");
+  const selectedAssigneeName = postHasAssignee ? post.assigneeName : (networkAssigneeIsAvailable ? network.assigneeName : "");
   const field = (label, name, value = "", tag = "textarea", extra = "") => `
     <label>${label}${tag === "input"
       ? `<input name="${name}" value="${esc(value)}" ${extra} ${disabled}>`
@@ -1776,9 +1865,10 @@ async function openPostEditor({ project, network, rubric, date, post }) {
     post ? "Публикация" : "Новая публикация",
     `<form class="form" id="post-form">
       ${editable ? '<div class="post-form-toolbar"><span>Сохраните изменения перед закрытием</span><button class="button primary">Сохранить</button></div>' : ""}
-      <div class="form-row">
+      <div class="form-row post-meta-row">
         <label>Дата<input value="${formatDate(date)}" disabled></label>
         <label>Рубрика<input value="${esc(rubric.name)}" disabled></label>
+        <label>Ответственный<select name="assigneeId" ${disabled}>${assigneeOptions(members, selectedAssigneeId, selectedAssigneeName)}</select></label>
       </div>
       <div class="post-editor-grid">
         <section class="editor-column">
@@ -1834,6 +1924,8 @@ async function openPostEditor({ project, network, rubric, date, post }) {
       saveButton.textContent = "Сохраняю…";
       const referenceFiles = data.getAll("referenceFiles").filter((file) => file instanceof File && file.size);
       const visualFiles = data.getAll("visualFiles").filter((file) => file instanceof File && file.size);
+      const assigneeId = data.get("assigneeId");
+      const selectedMember = members.find((member) => member.userId === assigneeId);
       const payload = {
         networkId: network.id,
         networkName: network.name,
@@ -1846,6 +1938,10 @@ async function openPostEditor({ project, network, rubric, date, post }) {
         format: data.get("format").trim(),
         caption: data.get("caption").trim(),
         status: data.get("status"),
+        assigneeId,
+        assigneeName: selectedMember
+          ? memberDisplayName(selectedMember)
+          : (assigneeId === selectedAssigneeId ? selectedAssigneeName || "" : ""),
         updatedAt: serverTimestamp(),
       };
       try {
