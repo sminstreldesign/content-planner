@@ -57,6 +57,13 @@ const ENTITY_SPECS = {
     fields: ["kind", "postId"],
     fieldLabels: { kind: "тип", postId: "публикация" },
   },
+  reference: {
+    label: "референс",
+    gender: "m",
+    name: (data) => data.note || data.networkName || "Референс",
+    fields: ["networkId", "networkName", "note", "media"],
+    fieldLabels: { networkId: "площадка", networkName: "площадка", note: "что понравилось", media: "медиафайлы" },
+  },
   comment: {
     label: "комментарий",
     gender: "m",
@@ -241,6 +248,7 @@ exports.auditNetwork = onDocumentWrittenWithAuthContext("projects/{projectId}/ne
 exports.auditRubric = onDocumentWrittenWithAuthContext("projects/{projectId}/rubrics/{entityId}", (event) => auditEntity(event, "rubric", event.params.entityId));
 exports.auditPost = onDocumentWrittenWithAuthContext("projects/{projectId}/posts/{entityId}", (event) => auditEntity(event, "post", event.params.entityId));
 exports.auditImage = onDocumentWrittenWithAuthContext("projects/{projectId}/postImages/{entityId}", (event) => auditEntity(event, "image", event.params.entityId));
+exports.auditReference = onDocumentWrittenWithAuthContext("projects/{projectId}/references/{entityId}", (event) => auditEntity(event, "reference", event.params.entityId));
 exports.auditComment = onDocumentWrittenWithAuthContext("projects/{projectId}/comments/{entityId}", (event) => auditEntity(event, "comment", event.params.entityId));
 exports.auditCompetitorAnalysis = onDocumentWrittenWithAuthContext("projects/{projectId}/competitorAnalyses/{entityId}", (event) => auditEntity(event, "competitorAnalysis", event.params.entityId));
 exports.auditAudienceAnalysis = onDocumentWrittenWithAuthContext("projects/{projectId}/audienceAnalyses/{entityId}", (event) => auditEntity(event, "audienceAnalysis", event.params.entityId));

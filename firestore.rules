@@ -71,6 +71,50 @@ service cloud.firestore {
         allow update: if false;
         allow delete: if hasRole(projectId, ['owner','editor']);
       }
+      match /references/{referenceId} {
+        function validMediaItem(item) {
+          return item is map
+            && item.keys().hasAll(['path', 'url', 'name', 'type', 'size'])
+            && item.keys().hasOnly(['path', 'url', 'name', 'type', 'size'])
+            && item.path is string
+            && item.path.matches('^projects/' + projectId + '/references/' + referenceId + '/[^/]+$')
+            && item.url is string && item.url.size() <= 2000
+            && item.name is string && item.name.size() <= 180
+            && item.type is string && item.type.matches('^(image|video)/.*')
+            && item.size is int && item.size >= 0 && item.size <= 52428800;
+        }
+        function validMediaList() {
+          return request.resource.data.media is list
+            && request.resource.data.media.size() <= 4
+            && (request.resource.data.media.size() < 1 || validMediaItem(request.resource.data.media[0]))
+            && (request.resource.data.media.size() < 2 || validMediaItem(request.resource.data.media[1]))
+            && (request.resource.data.media.size() < 3 || validMediaItem(request.resource.data.media[2]))
+            && (request.resource.data.media.size() < 4 || validMediaItem(request.resource.data.media[3]));
+        }
+        function validReference() {
+          return request.resource.data.networkId is string
+            && request.resource.data.networkId.size() <= 128
+            && exists(/databases/$(database)/documents/projects/$(projectId)/networks/$(request.resource.data.networkId))
+            && request.resource.data.networkName is string
+            && request.resource.data.networkName.size() <= 120
+            && request.resource.data.note is string
+            && request.resource.data.note.size() <= 4000
+            && request.resource.data.updatedBy == request.auth.uid
+            && request.resource.data.updatedAt is timestamp
+            && validMediaList();
+        }
+        allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
+        allow create: if hasRole(projectId, ['owner','editor'])
+          && request.resource.data.keys().hasAll(['networkId', 'networkName', 'note', 'media', 'authorId', 'createdAt', 'updatedBy', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['networkId', 'networkName', 'note', 'media', 'authorId', 'createdAt', 'updatedBy', 'updatedAt'])
+          && request.resource.data.authorId == request.auth.uid
+          && request.resource.data.createdAt is timestamp
+          && validReference();
+        allow update: if hasRole(projectId, ['owner','editor'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['networkId', 'networkName', 'note', 'media', 'updatedBy', 'updatedAt'])
+          && validReference();
+        allow delete: if hasRole(projectId, ['owner','editor']);
+      }
       match /comments/{commentId} {
         allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
         allow create: if hasRole(projectId, ['owner','editor']) && request.resource.data.authorId == request.auth.uid;

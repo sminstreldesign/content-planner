@@ -25,11 +25,19 @@ import {
   limit,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject,
+} from "https://www.gstatic.com/firebasejs/12.0.0/firebase-storage.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyD3X0A-r34omGmCmm2v1eXIm_bATY6G_Yw",
   authDomain: "content-planner-aef9e.firebaseapp.com",
   projectId: "content-planner-aef9e",
+  storageBucket: "content-planner-aef9e.firebasestorage.app",
   messagingSenderId: "879380511083",
   appId: "1:879380511083:web:a1e8f9a5f0d5cdb372b42e",
 };
@@ -38,6 +46,7 @@ const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
 auth.languageCode = "ru";
 const db = getFirestore(firebaseApp);
+const storage = getStorage(firebaseApp);
 const app = document.querySelector("#app");
 
 const ROLE_LABELS = {
@@ -1073,6 +1082,7 @@ function renderProjectWorkspace(project) {
       number: "05",
       title: "Референсы",
       description: "Примеры, идеи и визуальные ориентиры",
+      available: true,
     },
     {
       key: "notebook",
@@ -1126,7 +1136,273 @@ function renderProjectWorkspace(project) {
   document.querySelector('[data-open-work-area="audience"]').onclick = () => renderAudienceAnalysis(project);
   document.querySelector('[data-open-work-area="competitors"]').onclick = () => renderCompetitorAnalysis(project);
   document.querySelector('[data-open-work-area="audit"]').onclick = () => renderProjectDocument(project, "audit");
+  document.querySelector('[data-open-work-area="references"]').onclick = () => renderReferencesBoard(project);
   document.querySelector('[data-open-work-area="notebook"]').onclick = () => renderProjectDocument(project, "notebook");
+}
+
+/* ---------------- Референсы ---------------- */
+
+const REFERENCE_MEDIA_LIMIT = 4;
+const REFERENCE_MEDIA_MAX_BYTES = 50 * 1024 * 1024;
+const REFERENCE_COLUMN_COLORS = ["pink", "orange", "green", "violet", "blue", "peach"];
+
+function normalizeReferenceMedia(media, projectId, referenceId) {
+  if (!Array.isArray(media)) return [];
+  const pathPrefix = `projects/${projectId}/references/${referenceId}/`;
+  return media.slice(0, REFERENCE_MEDIA_LIMIT).filter((item) => (
+    item && typeof item === "object"
+    && typeof item.path === "string" && item.path.startsWith(pathPrefix)
+    && typeof item.url === "string" && /^https:\/\//i.test(item.url)
+    && typeof item.name === "string"
+    && typeof item.type === "string" && /^(image|video)\//i.test(item.type)
+  )).map((item) => ({
+    path: item.path,
+    url: item.url,
+    name: item.name.slice(0, 180),
+    type: item.type,
+    size: Number.isFinite(item.size) ? item.size : 0,
+  }));
+}
+
+function referenceMediaMarkup(media, compact = false, removable = true) {
+  if (!media.length) return compact ? '<span class="reference-card-empty">Без медиа</span>' : '<p class="muted">Медиафайлы пока не добавлены.</p>';
+  return media.map((item, index) => {
+    const label = esc(item.name || `Медиафайл ${index + 1}`);
+    const preview = item.type.startsWith("video/")
+      ? `<video src="${esc(item.url)}" muted preload="metadata" aria-label="${label}"></video><span class="reference-video-badge">Видео</span>`
+      : `<img src="${esc(item.url)}" alt="${label}">`;
+    return compact
+      ? `<span class="reference-card-media">${preview}</span>`
+      : `<span class="reference-editor-media-item">
+          <button type="button" class="reference-media-preview" data-view-reference-media="${index}" aria-label="Открыть ${label}">${preview}</button>
+          ${removable ? `<button type="button" class="image-remove" data-remove-reference-media="${index}" aria-label="Убрать ${label}">×</button>` : ""}
+        </span>`;
+  }).join("");
+}
+
+function openReferenceMediaViewer(item) {
+  const content = item.type.startsWith("video/")
+    ? `<div class="image-viewer"><video src="${esc(item.url)}" controls autoplay playsinline></video></div>`
+    : `<div class="image-viewer"><img src="${esc(item.url)}" alt="${esc(item.name || "Референс")}"></div>`;
+  openModal(item.name || "Медиафайл", content, "image-viewer-modal");
+}
+
+async function getReferenceEntries(projectId) {
+  const snapshot = await getDocs(collection(db, "projects", projectId, "references"));
+  return snapshot.docs.map((item) => ({
+    id: item.id,
+    ...item.data(),
+    media: normalizeReferenceMedia(item.data().media, projectId, item.id),
+  })).sort((a, b) => {
+    const aTime = a.createdAt?.toMillis?.() || 0;
+    const bTime = b.createdAt?.toMillis?.() || 0;
+    return aTime - bTime || a.id.localeCompare(b.id);
+  });
+}
+
+async function renderReferencesBoard(project) {
+  loader("Загружаю референсы…");
+  try {
+    const [networks, references] = await Promise.all([getNetworks(project.id), getReferenceEntries(project.id)]);
+    const editable = canEdit(project.role);
+    app.innerHTML = `
+      <section class="screen flow-screen references-screen">
+        ${pageTopbar("Рабочее пространство")}
+        <header class="references-heading">
+          <div>
+            <p class="step-indicator">Канбан-доска</p>
+            <h1>Референсы</h1>
+            <p class="subtitle">Собирайте примеры по соцсетям и фиксируйте, что именно хочется взять в работу.</p>
+          </div>
+          <span class="references-total">${references.length} ${references.length === 1 ? "референс" : "референсов"}</span>
+        </header>
+        <div data-message></div>
+        ${networks.length ? `
+          <div class="references-board" style="--reference-columns:${networks.length}">
+            ${networks.map((network, columnIndex) => {
+              const columnReferences = references.filter((item) => item.networkId === network.id);
+              const color = REFERENCE_COLUMN_COLORS[columnIndex % REFERENCE_COLUMN_COLORS.length];
+              return `<section class="reference-column reference-column-${color}">
+                <header class="reference-column-heading">
+                  <div><span>${String(columnIndex + 1).padStart(2, "0")}</span><h2>${esc(network.name)}</h2></div>
+                  <small>${columnReferences.length}</small>
+                </header>
+                <div class="reference-column-cards">
+                  ${columnReferences.map((entry, entryIndex) => `
+                    <button type="button" class="reference-card" data-open-reference="${entry.id}">
+                      <span class="reference-card-number">Референс ${entryIndex + 1}</span>
+                      <span class="reference-card-gallery reference-card-gallery-${Math.min(entry.media.length, 4)}">${referenceMediaMarkup(entry.media, true)}</span>
+                      <span class="reference-card-note">${esc(entry.note || "Добавьте описание: что понравилось")}</span>
+                      <span class="reference-card-open">Открыть →</span>
+                    </button>`).join("")}
+                  ${editable ? `<button type="button" class="reference-add-card" data-add-reference="${network.id}"><span>＋</span>Добавить референс</button>` : ""}
+                  ${!columnReferences.length && !editable ? '<p class="reference-column-empty">Референсов пока нет</p>' : ""}
+                </div>
+              </section>`;
+            }).join("")}
+          </div>` : `
+          <div class="card references-empty-state">
+            <h2>Сначала добавьте соцсеть</h2>
+            <p>Столбцы доски создаются автоматически из соцсетей проекта.</p>
+            ${project.role === "owner" ? '<button class="button primary" data-reference-network-settings>Настроить соцсети</button>' : ""}
+          </div>`}
+      </section>`;
+    bindTopbar(() => renderProjectWorkspace(project));
+    document.querySelector("[data-reference-network-settings]")?.addEventListener("click", () => renderNetworkSettings(project));
+    document.querySelectorAll("[data-add-reference]").forEach((button) => {
+      button.onclick = () => openReferenceEditor({
+        project,
+        network: networks.find((item) => item.id === button.dataset.addReference),
+        entry: null,
+      });
+    });
+    document.querySelectorAll("[data-open-reference]").forEach((button) => {
+      button.onclick = () => {
+        const entry = references.find((item) => item.id === button.dataset.openReference);
+        openReferenceEditor({ project, network: networks.find((item) => item.id === entry.networkId), entry });
+      };
+    });
+  } catch (error) {
+    app.innerHTML = `<div class="loader"><div><h2>Не удалось открыть референсы</h2><p class="error">${esc(readError(error))}</p><button class="button" data-reference-back>Назад</button></div></div>`;
+    document.querySelector("[data-reference-back]").onclick = () => renderProjectWorkspace(project);
+  }
+}
+
+function validateReferenceFile(file) {
+  if (!/^(image|video)\//i.test(file.type)) throw new Error(`Файл «${file.name}» не является изображением или видео.`);
+  if (file.size > REFERENCE_MEDIA_MAX_BYTES) throw new Error(`Файл «${file.name}» больше 50 МБ.`);
+}
+
+async function deleteStoredReferenceMedia(items) {
+  await Promise.allSettled(items.map((item) => deleteObject(storageRef(storage, item.path))));
+}
+
+async function openReferenceEditor({ project, network, entry }) {
+  const editable = canEdit(project.role);
+  const entryRef = entry
+    ? doc(db, "projects", project.id, "references", entry.id)
+    : doc(collection(db, "projects", project.id, "references"));
+  const originalMedia = entry?.media || [];
+  let keptMedia = [...originalMedia];
+  const disabled = editable ? "" : "disabled";
+  const modal = openModal(
+    entry ? `Референс · ${network.name}` : `Новый референс · ${network.name}`,
+    `<form class="form reference-editor-form" id="reference-form">
+      <div class="reference-editor-meta"><span>Соцсеть</span><strong>${esc(network.name)}</strong></div>
+      <label>Что понравилось
+        <textarea name="note" maxlength="4000" placeholder="Опишите идею, приём, подачу, визуальный стиль или деталь, которую хотите сохранить" ${disabled}>${esc(entry?.note || "")}</textarea>
+      </label>
+      <div class="reference-editor-files">
+        <div class="reference-editor-files-heading">
+          <div><strong>Медиафайлы</strong><small>До 4 изображений или видео, каждый файл — до 50 МБ</small></div>
+          <span data-reference-media-count>${keptMedia.length} / ${REFERENCE_MEDIA_LIMIT}</span>
+        </div>
+        <div class="reference-editor-media" data-reference-editor-media></div>
+        ${editable ? '<label class="reference-file-picker">Добавить файлы<input type="file" name="mediaFiles" accept="image/*,video/*" multiple></label><div class="reference-pending-files" data-reference-pending-files></div>' : ""}
+      </div>
+      ${editable ? `<div class="reference-editor-actions">${entry ? '<button type="button" class="button danger" data-delete-reference>Удалить</button>' : '<span></span>'}<button class="button primary">Сохранить</button></div>` : ""}
+      <div data-message></div>
+    </form>`,
+    "medium reference-editor-modal",
+  );
+  const form = modal.querySelector("#reference-form");
+  const fileInput = form.elements.mediaFiles;
+
+  const drawMedia = () => {
+    const newFiles = fileInput ? [...fileInput.files] : [];
+    modal.querySelector("[data-reference-editor-media]").innerHTML = referenceMediaMarkup(keptMedia, false, editable);
+    modal.querySelector("[data-reference-media-count]").textContent = `${keptMedia.length + newFiles.length} / ${REFERENCE_MEDIA_LIMIT}`;
+    const pending = modal.querySelector("[data-reference-pending-files]");
+    if (pending) pending.innerHTML = newFiles.map((file) => `<span>${esc(file.name)} <small>${Math.max(1, Math.round(file.size / 1024))} КБ</small></span>`).join("");
+    modal.querySelectorAll("[data-view-reference-media]").forEach((button) => {
+      button.onclick = () => openReferenceMediaViewer(keptMedia[Number(button.dataset.viewReferenceMedia)]);
+    });
+    modal.querySelectorAll("[data-remove-reference-media]").forEach((button) => {
+      button.onclick = () => {
+        keptMedia.splice(Number(button.dataset.removeReferenceMedia), 1);
+        drawMedia();
+      };
+    });
+  };
+  drawMedia();
+  fileInput?.addEventListener("change", () => {
+    const newFiles = [...fileInput.files];
+    try {
+      newFiles.forEach(validateReferenceFile);
+      if (keptMedia.length + newFiles.length > REFERENCE_MEDIA_LIMIT) throw new Error("В одном референсе можно сохранить не более четырёх медиафайлов.");
+      showMessage("", "success", form);
+    } catch (error) {
+      fileInput.value = "";
+      showMessage(error.message, "error", form);
+    }
+    drawMedia();
+  });
+
+  if (!editable) return;
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    const data = new FormData(form);
+    const files = data.getAll("mediaFiles").filter((file) => file instanceof File && file.size);
+    try {
+      files.forEach(validateReferenceFile);
+      if (keptMedia.length + files.length > REFERENCE_MEDIA_LIMIT) throw new Error("В одном референсе можно сохранить не более четырёх медиафайлов.");
+    } catch (error) {
+      showMessage(error.message, "error", form);
+      return;
+    }
+    const progress = beginFormProgress(form, "Сохраняю референс…", files.length + 1);
+    if (!progress) return;
+    const uploaded = [];
+    try {
+      for (const file of files) {
+        const fileId = globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+        const path = `projects/${project.id}/references/${entryRef.id}/${fileId}`;
+        const fileRef = storageRef(storage, path);
+        await uploadBytes(fileRef, file, { contentType: file.type });
+        uploaded.push({
+          path,
+          url: await getDownloadURL(fileRef),
+          name: file.name.slice(0, 180),
+          type: file.type,
+          size: file.size,
+        });
+        progress.advance(`Загружен файл «${file.name}»`);
+      }
+      const payload = {
+        networkId: network.id,
+        networkName: network.name,
+        note: data.get("note").trim(),
+        media: [...keptMedia, ...uploaded],
+        updatedBy: user.uid,
+        updatedAt: serverTimestamp(),
+      };
+      if (entry) await updateDoc(entryRef, payload);
+      else await setDoc(entryRef, { ...payload, authorId: user.uid, createdAt: serverTimestamp() });
+      progress.advance("Референс сохранён");
+      const removedMedia = originalMedia.filter((item) => !keptMedia.some((kept) => kept.path === item.path));
+      await deleteStoredReferenceMedia(removedMedia);
+      modal.remove();
+      await renderReferencesBoard(project);
+    } catch (error) {
+      await deleteStoredReferenceMedia(uploaded);
+      showMessage(readError(error), "error", form);
+    } finally {
+      progress.finish();
+    }
+  };
+  modal.querySelector("[data-delete-reference]")?.addEventListener("click", async (event) => {
+    if (!confirm("Удалить этот референс вместе с медиафайлами?")) return;
+    event.currentTarget.disabled = true;
+    try {
+      await deleteDoc(entryRef);
+      await deleteStoredReferenceMedia(originalMedia);
+      modal.remove();
+      await renderReferencesBoard(project);
+    } catch (error) {
+      event.currentTarget.disabled = false;
+      showMessage(readError(error), "error", form);
+    }
+  });
 }
 
 /* ---------------- Анализ целевой аудитории ---------------- */
@@ -2607,18 +2883,20 @@ async function deleteProject(project) {
   let projectDeleted = false;
   await updateDoc(projectRef, { deletingAt: serverTimestamp(), updatedAt: serverTimestamp() });
   try {
-    const snapshots = [];
-    for (const subcollection of ["networks", "rubrics", "posts", "postImages", "comments", "audienceAnalyses", "competitorAnalyses", "projectDocuments", "activity"]) {
+    const snapshots = new Map();
+    for (const subcollection of ["networks", "rubrics", "posts", "postImages", "comments", "references", "audienceAnalyses", "competitorAnalyses", "projectDocuments", "activity"]) {
       try {
-        snapshots.push(await getDocs(collection(db, "projects", project.id, subcollection)));
+        snapshots.set(subcollection, await getDocs(collection(db, "projects", project.id, subcollection)));
       } catch (error) {
-        if (["postImages", "audienceAnalyses", "competitorAnalyses", "projectDocuments", "activity"].includes(subcollection) && error?.code === "permission-denied") {
+        if (["postImages", "references", "audienceAnalyses", "competitorAnalyses", "projectDocuments", "activity"].includes(subcollection) && error?.code === "permission-denied") {
           throw new Error("Firestore не разрешил удалить связанные данные. Опубликуйте актуальный файл firestore.rules в Firebase и повторите удаление.");
         }
         throw error;
       }
     }
-    for (const snapshot of snapshots) {
+    const referenceMedia = snapshots.get("references").docs.flatMap((item) => normalizeReferenceMedia(item.data().media, project.id, item.id));
+    await deleteStoredReferenceMedia(referenceMedia);
+    for (const snapshot of snapshots.values()) {
       for (const item of snapshot.docs) await deleteDoc(item.ref);
     }
     const members = await getDocs(query(collection(db, "memberships"), where("projectId", "==", project.id)));
