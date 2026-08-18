@@ -527,6 +527,46 @@ function renderAuth(mode = "welcome") {
   };
 }
 
+function landingOllieMarkup(variant) {
+  const runnerProps = variant === "runner" ? `
+    <g class="landing-ollie-notebook">
+      <rect x="73" y="110" width="76" height="64" rx="9" />
+      <path d="M88 128h46M88 142h39M88 156h32" />
+      <path class="landing-ollie-pen" d="m143 103 17-29 6 4-17 29Z" />
+    </g>` : "";
+  return `
+    <div class="landing-ollie landing-ollie-${variant}" aria-hidden="true">
+      <svg viewBox="0 0 220 250">
+        <defs>
+          <linearGradient id="landing-ollie-body-${variant}" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#a5b27d" />
+            <stop offset=".55" stop-color="#7f8f5b" />
+            <stop offset="1" stop-color="#657247" />
+          </linearGradient>
+        </defs>
+        <ellipse class="landing-ollie-shadow" cx="110" cy="226" rx="48" ry="9" />
+        <g class="landing-ollie-character">
+          <g class="landing-ollie-leg landing-ollie-leg-left"><path d="M88 184c-4 17-12 27-25 37" /><path d="M63 221 45 219" /></g>
+          <g class="landing-ollie-leg landing-ollie-leg-right"><path d="M132 184c4 17 12 27 25 37" /><path d="m157 221 18-2" /></g>
+          <g class="landing-ollie-arm landing-ollie-arm-left"><path d="M63 105C43 98 34 85 31 69" /><path d="m31 69-8 9m8-9 8 6" /></g>
+          <g class="landing-ollie-arm landing-ollie-arm-right"><path d="M157 105c20-7 29-20 32-36" /><path d="m189 69-8 9m8-9 8 6" /></g>
+          <path class="landing-ollie-body" fill="url(#landing-ollie-body-${variant})" d="M110 24c38 0 61 38 61 83 0 49-23 80-61 80s-61-31-61-80c0-45 23-83 61-83Z" />
+          <path class="landing-ollie-shine" d="M75 57c10-17 23-26 38-29-15 20-23 42-25 64-14-5-20-20-13-35Z" />
+          <ellipse class="landing-ollie-opening" cx="110" cy="29" rx="22" ry="9" />
+          <ellipse class="landing-ollie-pimento" cx="110" cy="29" rx="13" ry="5.5" />
+          <circle class="landing-ollie-cheek" cx="78" cy="121" r="8" />
+          <circle class="landing-ollie-cheek" cx="142" cy="121" r="8" />
+          <ellipse class="landing-ollie-eye" cx="87" cy="100" rx="6" ry="8" />
+          <ellipse class="landing-ollie-eye" cx="133" cy="100" rx="6" ry="8" />
+          <circle class="landing-ollie-eye-glint" cx="89" cy="97" r="2" />
+          <circle class="landing-ollie-eye-glint" cx="135" cy="97" r="2" />
+          <path class="landing-ollie-mouth" d="M86 130q24 25 48 0" />
+          ${runnerProps}
+        </g>
+      </svg>
+    </div>`;
+}
+
 function renderLanding() {
   app.innerHTML = `
     <div class="landing-page">
@@ -556,20 +596,14 @@ function renderLanding() {
               <button class="button primary landing-main-cta" type="button" data-auth-mode="register">Создать первый проект</button>
               <a class="landing-secondary-link" href="#workflow">Посмотреть, как работает <span aria-hidden="true">↓</span></a>
             </div>
-            <p class="landing-note">Бесплатный старт · без банковской карты</p>
+            <p class="landing-note">Бесплатный старт</p>
           </div>
           <div class="landing-hero-visual" data-reveal>
             <div class="landing-speech">Привет! Я Олли.<br>Покажу, как навести порядок.</div>
-            <div class="landing-olive landing-olive-hero" aria-hidden="true">
-              <span class="landing-olive-face"><i></i><i></i><b></b></span>
-              <span class="landing-olive-arm landing-olive-arm-left"></span>
-              <span class="landing-olive-arm landing-olive-arm-right"></span>
-              <span class="landing-olive-leg landing-olive-leg-left"></span>
-              <span class="landing-olive-leg landing-olive-leg-right"></span>
-            </div>
+            ${landingOllieMarkup("hero")}
             <div class="landing-preview-window landing-preview-window-hero">
               <div class="landing-window-bar"><span></span><span></span><span></span><small>Мои проекты</small></div>
-              <img src="assets/screen-projects.png" alt="Главный экран Контент-плана со списком проектов" width="1440" height="900">
+              <img src="assets/screen-projects.png?v=3" alt="Главный экран Контент-плана со списком проектов и Олли" width="1258" height="631">
             </div>
           </div>
         </section>
@@ -597,7 +631,10 @@ function renderLanding() {
               </div>
               <div class="landing-preview-window">
                 <div class="landing-window-bar"><span></span><span></span><span></span><small>Проекты</small></div>
-                <img src="assets/screen-projects.png" alt="Список реальных проектов в Контент-плане" loading="lazy" width="1440" height="900">
+                <div class="landing-feature-screen">
+                  <img src="assets/screen-projects.png?v=3" alt="Реальный главный экран Контент-плана" loading="lazy" width="1258" height="631">
+                  ${landingOllieMarkup("peek")}
+                </div>
               </div>
             </article>
             <article class="landing-feature-card" data-reveal>
@@ -608,7 +645,7 @@ function renderLanding() {
                 <span>Telegram</span><span>VK</span><span>Дзен</span>
               </div>
             </article>
-            <article class="landing-feature-card landing-feature-card-olive" data-reveal>
+            <article class="landing-feature-card" data-reveal>
               <span class="landing-feature-number">03</span>
               <h3>Закрепите рубрики</h3>
               <p>Свяжите каждую рубрику с одной или несколькими площадками. В плане останутся только подходящие темы.</p>
@@ -629,7 +666,7 @@ function renderLanding() {
           <div class="landing-product-stage" data-reveal>
             <div class="landing-stage-tabs" role="tablist" aria-label="Экраны продукта">
               <button type="button" role="tab" aria-selected="true" data-screen="assets/screen-settings.png" data-screen-alt="Настройки площадок и рубрик" data-screen-caption="Настройте площадки и рубрики один раз — они появятся во всех планах проекта.">1. Настройка</button>
-              <button type="button" role="tab" aria-selected="false" data-screen="assets/screen-editor.png" data-screen-alt="Редактор публикации с текстом и материалами" data-screen-caption="Соберите текст, референсы, визуал и статус публикации в одной карточке.">2. Публикация</button>
+              <button type="button" role="tab" aria-selected="false" data-screen="assets/screen-editor.png?v=3" data-screen-alt="Редактор публикации с задачей, готовым материалом и визуалом" data-screen-caption="Соберите задачу, готовый текст, визуал и статус публикации в одной карточке.">2. Публикация</button>
               <button type="button" role="tab" aria-selected="false" data-screen="assets/screen-plan.png" data-screen-alt="Календарный контент-план проекта" data-screen-caption="Смотрите месяц целиком и открывайте любую публикацию прямо из календаря.">3. План</button>
             </div>
             <div class="landing-preview-window landing-stage-window">
@@ -642,20 +679,20 @@ function renderLanding() {
 
         <section class="landing-team landing-section" id="team">
           <div class="landing-team-copy" data-reveal>
-            <p class="landing-kicker">Командная работа без путаницы</p>
-            <h2>Каждый видит своё и не ломает чужое</h2>
-            <p>Владелец управляет проектом и доступами. Редактор меняет план и публикации. Читатель следит за работой без права редактирования.</p>
+            <p class="landing-kicker">Три роли в одном проекте</p>
+            <h2>Каждому — свой уровень доступа</h2>
+            <p>Владелец настраивает проект и приглашает участников. Редактор меняет публикации. Читатель просматривает план и комментарии.</p>
             <ul class="landing-check-list">
-              <li>Приглашение по короткому коду</li>
-              <li>Понятные роли и права</li>
-              <li>Комментарии внутри публикации</li>
+              <li>Вход по восьмизначному коду</li>
+              <li>Доступы для каждой роли</li>
+              <li>Обсуждение в карточке публикации</li>
             </ul>
           </div>
           <div class="landing-team-scene" data-reveal aria-label="Три роли в команде">
             <div class="landing-role-card"><span>В</span><div><strong>Владелец</strong><small>Настройки и доступы</small></div></div>
             <div class="landing-role-card"><span>Р</span><div><strong>Редактор</strong><small>План и публикации</small></div></div>
             <div class="landing-role-card"><span>Ч</span><div><strong>Читатель</strong><small>Просмотр проекта</small></div></div>
-            <div class="landing-olive landing-olive-runner" aria-hidden="true"><span class="landing-olive-face"><i></i><i></i><b></b></span><span class="landing-olive-arm landing-olive-arm-left"></span><span class="landing-olive-arm landing-olive-arm-right"></span><span class="landing-olive-leg landing-olive-leg-left"></span><span class="landing-olive-leg landing-olive-leg-right"></span></div>
+            ${landingOllieMarkup("runner")}
           </div>
         </section>
 
