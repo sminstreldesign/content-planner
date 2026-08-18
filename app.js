@@ -25,19 +25,10 @@ import {
   limit,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
-import {
-  getStorage,
-  ref as storageRef,
-  uploadBytes,
-  getDownloadURL,
-  deleteObject,
-} from "https://www.gstatic.com/firebasejs/12.0.0/firebase-storage.js";
-
 const firebaseConfig = {
   apiKey: "AIzaSyD3X0A-r34omGmCmm2v1eXIm_bATY6G_Yw",
   authDomain: "content-planner-aef9e.firebaseapp.com",
   projectId: "content-planner-aef9e",
-  storageBucket: "content-planner-aef9e.firebasestorage.app",
   messagingSenderId: "879380511083",
   appId: "1:879380511083:web:a1e8f9a5f0d5cdb372b42e",
 };
@@ -46,7 +37,6 @@ const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
 auth.languageCode = "ru";
 const db = getFirestore(firebaseApp);
-const storage = getStorage(firebaseApp);
 const app = document.querySelector("#app");
 
 const ROLE_LABELS = {
@@ -1142,35 +1132,26 @@ function renderProjectWorkspace(project) {
 
 /* ---------------- Референсы ---------------- */
 
-const REFERENCE_MEDIA_LIMIT = 4;
-const REFERENCE_MEDIA_MAX_BYTES = 50 * 1024 * 1024;
+const REFERENCE_IMAGE_LIMIT = 4;
 const REFERENCE_COLUMN_COLORS = ["pink", "orange", "green", "violet", "blue", "peach"];
 
-function normalizeReferenceMedia(media, projectId, referenceId) {
+function normalizeReferenceMedia(media) {
   if (!Array.isArray(media)) return [];
-  const pathPrefix = `projects/${projectId}/references/${referenceId}/`;
-  return media.slice(0, REFERENCE_MEDIA_LIMIT).filter((item) => (
+  return media.slice(0, REFERENCE_IMAGE_LIMIT).filter((item) => (
     item && typeof item === "object"
-    && typeof item.path === "string" && item.path.startsWith(pathPrefix)
-    && typeof item.url === "string" && /^https:\/\//i.test(item.url)
+    && typeof item.dataUrl === "string" && /^data:image\/webp;base64,/i.test(item.dataUrl)
     && typeof item.name === "string"
-    && typeof item.type === "string" && /^(image|video)\//i.test(item.type)
   )).map((item) => ({
-    path: item.path,
-    url: item.url,
+    dataUrl: item.dataUrl,
     name: item.name.slice(0, 180),
-    type: item.type,
-    size: Number.isFinite(item.size) ? item.size : 0,
   }));
 }
 
 function referenceMediaMarkup(media, compact = false, removable = true) {
-  if (!media.length) return compact ? '<span class="reference-card-empty">Без медиа</span>' : '<p class="muted">Медиафайлы пока не добавлены.</p>';
+  if (!media.length) return compact ? '<span class="reference-card-empty">Без изображений</span>' : '<p class="muted">Изображения пока не добавлены.</p>';
   return media.map((item, index) => {
-    const label = esc(item.name || `Медиафайл ${index + 1}`);
-    const preview = item.type.startsWith("video/")
-      ? `<video src="${esc(item.url)}" muted preload="metadata" aria-label="${label}"></video><span class="reference-video-badge">Видео</span>`
-      : `<img src="${esc(item.url)}" alt="${label}">`;
+    const label = esc(item.name || `Изображение ${index + 1}`);
+    const preview = `<img src="${esc(item.dataUrl)}" alt="${label}">`;
     return compact
       ? `<span class="reference-card-media">${preview}</span>`
       : `<span class="reference-editor-media-item">
@@ -1181,10 +1162,8 @@ function referenceMediaMarkup(media, compact = false, removable = true) {
 }
 
 function openReferenceMediaViewer(item) {
-  const content = item.type.startsWith("video/")
-    ? `<div class="image-viewer"><video src="${esc(item.url)}" controls autoplay playsinline></video></div>`
-    : `<div class="image-viewer"><img src="${esc(item.url)}" alt="${esc(item.name || "Референс")}"></div>`;
-  openModal(item.name || "Медиафайл", content, "image-viewer-modal");
+  const content = `<div class="image-viewer"><img src="${esc(item.dataUrl)}" alt="${esc(item.name || "Референс")}"></div>`;
+  openModal(item.name || "Изображение", content, "image-viewer-modal");
 }
 
 async function getReferenceEntries(projectId) {
@@ -1192,7 +1171,7 @@ async function getReferenceEntries(projectId) {
   return snapshot.docs.map((item) => ({
     id: item.id,
     ...item.data(),
-    media: normalizeReferenceMedia(item.data().media, projectId, item.id),
+    media: normalizeReferenceMedia(item.data().media),
   })).sort((a, b) => {
     const aTime = a.createdAt?.toMillis?.() || 0;
     const bTime = b.createdAt?.toMillis?.() || 0;
@@ -1269,12 +1248,8 @@ async function renderReferencesBoard(project) {
 }
 
 function validateReferenceFile(file) {
-  if (!/^(image|video)\//i.test(file.type)) throw new Error(`Файл «${file.name}» не является изображением или видео.`);
-  if (file.size > REFERENCE_MEDIA_MAX_BYTES) throw new Error(`Файл «${file.name}» больше 50 МБ.`);
-}
-
-async function deleteStoredReferenceMedia(items) {
-  await Promise.allSettled(items.map((item) => deleteObject(storageRef(storage, item.path))));
+  if (!file.type.startsWith("image/")) throw new Error(`Файл «${file.name}» не является изображением.`);
+  if (file.size > 20 * 1024 * 1024) throw new Error(`Файл «${file.name}» больше 20 МБ.`);
 }
 
 async function openReferenceEditor({ project, network, entry }) {
@@ -1282,8 +1257,7 @@ async function openReferenceEditor({ project, network, entry }) {
   const entryRef = entry
     ? doc(db, "projects", project.id, "references", entry.id)
     : doc(collection(db, "projects", project.id, "references"));
-  const originalMedia = entry?.media || [];
-  let keptMedia = [...originalMedia];
+  let keptMedia = [...(entry?.media || [])];
   const disabled = editable ? "" : "disabled";
   const modal = openModal(
     entry ? `Референс · ${network.name}` : `Новый референс · ${network.name}`,
@@ -1294,11 +1268,11 @@ async function openReferenceEditor({ project, network, entry }) {
       </label>
       <div class="reference-editor-files">
         <div class="reference-editor-files-heading">
-          <div><strong>Медиафайлы</strong><small>До 4 изображений или видео, каждый файл — до 50 МБ</small></div>
-          <span data-reference-media-count>${keptMedia.length} / ${REFERENCE_MEDIA_LIMIT}</span>
+          <div><strong>Изображения</strong><small>До 4 фотографий, каждый исходный файл — до 20 МБ</small></div>
+          <span data-reference-media-count>${keptMedia.length} / ${REFERENCE_IMAGE_LIMIT}</span>
         </div>
         <div class="reference-editor-media" data-reference-editor-media></div>
-        ${editable ? '<label class="reference-file-picker">Добавить файлы<input type="file" name="mediaFiles" accept="image/*,video/*" multiple></label><div class="reference-pending-files" data-reference-pending-files></div>' : ""}
+        ${editable ? '<label class="reference-file-picker">Добавить фото<input type="file" name="mediaFiles" accept="image/*" multiple></label><div class="reference-pending-files" data-reference-pending-files></div>' : ""}
       </div>
       ${editable ? `<div class="reference-editor-actions">${entry ? '<button type="button" class="button danger" data-delete-reference>Удалить</button>' : '<span></span>'}<button class="button primary">Сохранить</button></div>` : ""}
       <div data-message></div>
@@ -1311,7 +1285,7 @@ async function openReferenceEditor({ project, network, entry }) {
   const drawMedia = () => {
     const newFiles = fileInput ? [...fileInput.files] : [];
     modal.querySelector("[data-reference-editor-media]").innerHTML = referenceMediaMarkup(keptMedia, false, editable);
-    modal.querySelector("[data-reference-media-count]").textContent = `${keptMedia.length + newFiles.length} / ${REFERENCE_MEDIA_LIMIT}`;
+    modal.querySelector("[data-reference-media-count]").textContent = `${keptMedia.length + newFiles.length} / ${REFERENCE_IMAGE_LIMIT}`;
     const pending = modal.querySelector("[data-reference-pending-files]");
     if (pending) pending.innerHTML = newFiles.map((file) => `<span>${esc(file.name)} <small>${Math.max(1, Math.round(file.size / 1024))} КБ</small></span>`).join("");
     modal.querySelectorAll("[data-view-reference-media]").forEach((button) => {
@@ -1329,7 +1303,7 @@ async function openReferenceEditor({ project, network, entry }) {
     const newFiles = [...fileInput.files];
     try {
       newFiles.forEach(validateReferenceFile);
-      if (keptMedia.length + newFiles.length > REFERENCE_MEDIA_LIMIT) throw new Error("В одном референсе можно сохранить не более четырёх медиафайлов.");
+      if (keptMedia.length + newFiles.length > REFERENCE_IMAGE_LIMIT) throw new Error("В одном референсе можно сохранить не более четырёх изображений.");
       showMessage("", "success", form);
     } catch (error) {
       fileInput.value = "";
@@ -1345,57 +1319,46 @@ async function openReferenceEditor({ project, network, entry }) {
     const files = data.getAll("mediaFiles").filter((file) => file instanceof File && file.size);
     try {
       files.forEach(validateReferenceFile);
-      if (keptMedia.length + files.length > REFERENCE_MEDIA_LIMIT) throw new Error("В одном референсе можно сохранить не более четырёх медиафайлов.");
+      if (keptMedia.length + files.length > REFERENCE_IMAGE_LIMIT) throw new Error("В одном референсе можно сохранить не более четырёх изображений.");
     } catch (error) {
       showMessage(error.message, "error", form);
       return;
     }
     const progress = beginFormProgress(form, "Сохраняю референс…", files.length + 1);
     if (!progress) return;
-    const uploaded = [];
     try {
+      const preparedImages = [];
       for (const file of files) {
-        const fileId = globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-        const path = `projects/${project.id}/references/${entryRef.id}/${fileId}`;
-        const fileRef = storageRef(storage, path);
-        await uploadBytes(fileRef, file, { contentType: file.type });
-        uploaded.push({
-          path,
-          url: await getDownloadURL(fileRef),
+        preparedImages.push({
+          dataUrl: await compressImage(file),
           name: file.name.slice(0, 180),
-          type: file.type,
-          size: file.size,
         });
-        progress.advance(`Загружен файл «${file.name}»`);
+        progress.advance(`Подготовлен файл «${file.name}»`);
       }
       const payload = {
         networkId: network.id,
         networkName: network.name,
         note: data.get("note").trim(),
-        media: [...keptMedia, ...uploaded],
+        media: [...keptMedia, ...preparedImages],
         updatedBy: user.uid,
         updatedAt: serverTimestamp(),
       };
       if (entry) await updateDoc(entryRef, payload);
       else await setDoc(entryRef, { ...payload, authorId: user.uid, createdAt: serverTimestamp() });
       progress.advance("Референс сохранён");
-      const removedMedia = originalMedia.filter((item) => !keptMedia.some((kept) => kept.path === item.path));
-      await deleteStoredReferenceMedia(removedMedia);
       modal.remove();
       await renderReferencesBoard(project);
     } catch (error) {
-      await deleteStoredReferenceMedia(uploaded);
       showMessage(readError(error), "error", form);
     } finally {
       progress.finish();
     }
   };
   modal.querySelector("[data-delete-reference]")?.addEventListener("click", async (event) => {
-    if (!confirm("Удалить этот референс вместе с медиафайлами?")) return;
+    if (!confirm("Удалить этот референс вместе с изображениями?")) return;
     event.currentTarget.disabled = true;
     try {
       await deleteDoc(entryRef);
-      await deleteStoredReferenceMedia(originalMedia);
       modal.remove();
       await renderReferencesBoard(project);
     } catch (error) {
@@ -2894,8 +2857,6 @@ async function deleteProject(project) {
         throw error;
       }
     }
-    const referenceMedia = snapshots.get("references").docs.flatMap((item) => normalizeReferenceMedia(item.data().media, project.id, item.id));
-    await deleteStoredReferenceMedia(referenceMedia);
     for (const snapshot of snapshots.values()) {
       for (const item of snapshot.docs) await deleteDoc(item.ref);
     }

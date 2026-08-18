@@ -74,14 +74,12 @@ service cloud.firestore {
       match /references/{referenceId} {
         function validMediaItem(item) {
           return item is map
-            && item.keys().hasAll(['path', 'url', 'name', 'type', 'size'])
-            && item.keys().hasOnly(['path', 'url', 'name', 'type', 'size'])
-            && item.path is string
-            && item.path.matches('^projects/' + projectId + '/references/' + referenceId + '/[^/]+$')
-            && item.url is string && item.url.size() <= 2000
-            && item.name is string && item.name.size() <= 180
-            && item.type is string && item.type.matches('^(image|video)/.*')
-            && item.size is int && item.size >= 0 && item.size <= 52428800;
+            && item.keys().hasAll(['dataUrl', 'name'])
+            && item.keys().hasOnly(['dataUrl', 'name'])
+            && item.dataUrl is string
+            && item.dataUrl.size() <= 140000
+            && item.dataUrl.matches('^data:image/webp;base64,.*')
+            && item.name is string && item.name.size() <= 180;
         }
         function validMediaList() {
           return request.resource.data.media is list
