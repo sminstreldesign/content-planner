@@ -338,6 +338,48 @@ textarea { min-height: 105px; resize: vertical; }
 .activity-empty { padding: 38px 20px; border: 1px dashed var(--line); border-radius: 18px; text-align: center; }
 .activity-empty h2 { margin-bottom: 6px; }
 
+/* Анализ конкурентов */
+.competitor-page-heading { max-width: 900px; margin: 38px 0 28px; }
+.competitor-page-heading h1 { font-size: clamp(2.8rem, 6vw, 5.4rem); }
+.competitor-analysis-form { display: grid; gap: 28px; }
+.competitor-editor-card, .competitor-chart-card { overflow: hidden; padding: clamp(20px, 4vw, 40px); }
+.competitor-section-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 24px; }
+.competitor-section-heading h2, .competitor-section-heading p { margin-bottom: 5px; }
+.competitor-editor-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 9px; }
+.competitor-table-scroll { overflow-x: auto; margin: 0 calc(clamp(20px, 4vw, 40px) * -1); padding: 0 clamp(20px, 4vw, 40px) 12px; }
+.competitor-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+.competitor-table th, .competitor-table td { width: 270px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 14px; vertical-align: top; text-align: left; }
+.competitor-table th:first-child { width: 220px; border-left: 1px solid var(--line); background: rgba(var(--secondary-rgb), .1); }
+.competitor-table thead th { border-top: 1px solid var(--line); background: rgba(var(--secondary-rgb), .16); vertical-align: middle; }
+.competitor-table thead th:first-child { border-top-left-radius: 18px; }
+.competitor-table thead th:last-child { border-top-right-radius: 18px; }
+.competitor-table tbody tr:last-child th:first-child { border-bottom-left-radius: 18px; }
+.competitor-table tbody tr:last-child td:last-child { border-bottom-right-radius: 18px; }
+.competitor-table-label { display: block; font-size: .82rem; letter-spacing: .05em; text-transform: uppercase; }
+.competitor-company-heading, .competitor-criterion-heading { display: flex; align-items: center; gap: 8px; }
+.competitor-company-heading input, .competitor-criterion-heading input { min-width: 0; font-weight: 700; }
+.competitor-company-heading .icon-button, .competitor-criterion-heading .icon-button { flex: 0 0 38px; }
+.competitor-color { width: 10px; height: 34px; flex: 0 0 10px; border-radius: 99px; }
+.competitor-table textarea { min-height: 96px; background: rgba(var(--surface-rgb), .74); }
+.competitor-score { display: grid; grid-template-columns: auto 64px auto; align-items: center; justify-content: end; gap: 8px; margin-top: 10px; color: rgba(var(--text-rgb), .72); font-size: .87rem; }
+.competitor-score input { padding: 7px 8px; text-align: center; }
+.competitor-save-row { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-top: 22px; }
+.competitor-note-readonly { min-height: 72px; margin-bottom: 12px; white-space: pre-wrap; }
+.competitor-score-badge { display: inline-flex; border-radius: 99px; padding: 5px 10px; background: rgba(var(--secondary-rgb), .2); font-weight: 700; }
+.competitor-chart-card { min-height: 500px; }
+.competitor-chart-scroll { max-width: 920px; margin: 0 auto; overflow-x: auto; }
+.competitor-radar { display: block; width: 100%; min-width: 680px; height: auto; }
+.radar-grid polygon { fill: none; stroke: rgba(var(--text-rgb), .18); stroke-width: 1; }
+.radar-grid line { stroke: rgba(var(--text-rgb), .18); stroke-width: 1; }
+.radar-scale text { fill: rgba(var(--text-rgb), .52); font: 12px Arial, sans-serif; }
+.radar-labels text, .radar-legend text { fill: var(--text); font: 14px Georgia, "Times New Roman", serif; }
+.radar-series polygon { fill: var(--series-color); fill-opacity: .1; stroke: var(--series-color); stroke-width: 3; stroke-linejoin: round; }
+.radar-series circle { fill: var(--series-color); }
+.radar-legend line { stroke-width: 3; }
+.competitor-chart-empty { display: grid; min-height: 310px; place-content: center; gap: 8px; border: 1px dashed var(--line); border-radius: 20px; padding: 28px; text-align: center; }
+.competitor-chart-empty strong { font-size: 1.2rem; }
+.competitor-chart-empty span { color: rgba(var(--text-rgb), .68); }
+
 /* Контент-план */
 .plan-screen { min-height: 100vh; padding: 12px 18px 24px; background: var(--background); }
 .plan-header { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 20px; align-items: start; margin: 12px 0; }
@@ -590,6 +632,9 @@ textarea { min-height: 105px; resize: vertical; }
   .welcome-hero { grid-template-columns: 1fr; gap: 0; min-height: 0; }
   .welcome-copy h1 { font-size: clamp(2.15rem, 7vw, 3.4rem); }
   .dashboard-olive-scene { width: min(78vw, 340px); margin-top: -8px; transform: translate3d(0, 0, 65px) scale(1.04); }
+  .competitor-section-heading { flex-direction: column; }
+  .competitor-editor-actions { width: 100%; justify-content: flex-start; }
+  .competitor-chart-card { min-height: 0; }
 }
 
 @media (max-width: 520px) {
@@ -608,6 +653,11 @@ textarea { min-height: 105px; resize: vertical; }
   .workspace-ollie { min-height: 290px; }
   .custom-network { flex-direction: column; }
   .activity-heading { align-items: center; }
+  .competitor-page-heading { margin-top: 24px; }
+  .competitor-page-heading h1 { font-size: clamp(2.35rem, 12vw, 3.5rem); }
+  .competitor-save-row { align-items: stretch; flex-direction: column; }
+  .competitor-save-row .button { width: 100%; }
+  .competitor-editor-actions .button { flex: 1; }
   .plan-screen { padding: 12px; }
   .plan-header { grid-template-columns: 1fr; }
   .post-form-toolbar { align-items: stretch; flex-direction: column; }

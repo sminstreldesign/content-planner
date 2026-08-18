@@ -79,6 +79,32 @@ service cloud.firestore {
         allow create: if hasRole(projectId, ['owner','editor']) && request.resource.data.authorId == request.auth.uid;
         allow update, delete: if isOwner(projectId);
       }
+      match /competitorAnalyses/{analysisId} {
+        function validAnalysis() {
+          return request.resource.data.companies is list
+            && request.resource.data.companies.size() >= 2
+            && request.resource.data.companies.size() <= 6
+            && request.resource.data.criteria is list
+            && request.resource.data.criteria.size() >= 1
+            && request.resource.data.criteria.size() <= 12
+            && request.resource.data.updatedBy == request.auth.uid
+            && request.resource.data.updatedAt is timestamp;
+        }
+        allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
+        allow create: if analysisId == 'main'
+          && hasRole(projectId, ['owner','editor'])
+          && request.resource.data.keys().hasAll(['companies', 'criteria', 'updatedBy', 'createdAt', 'updatedAt'])
+          && request.resource.data.keys().hasOnly(['companies', 'criteria', 'updatedBy', 'createdAt', 'updatedAt'])
+          && request.resource.data.createdAt is timestamp
+          && validAnalysis();
+        allow update: if analysisId == 'main'
+          && hasRole(projectId, ['owner','editor'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['companies', 'criteria', 'updatedBy', 'updatedAt'])
+          && validAnalysis();
+        allow delete: if isOwner(projectId)
+          && get(/databases/$(database)/documents/projects/$(projectId)).data.keys().hasAny(['deletingAt'])
+          && get(/databases/$(database)/documents/projects/$(projectId)).data.deletingAt is timestamp;
+      }
       match /activity/{activityId} {
         allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
         allow create, update: if false;

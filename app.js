@@ -1219,6 +1219,7 @@ function renderProjectWorkspace(project) {
       number: "03",
       title: "Конкуренты",
       description: "Сравнение позиционирования и контента",
+      available: true,
     },
     {
       key: "audit",
@@ -1249,7 +1250,7 @@ function renderProjectWorkspace(project) {
         <div class="workspace-heading">
           <p class="step-indicator">Рабочее пространство</p>
           <h2>Над чем поработаем?</h2>
-          <p>Выберите направление. Сейчас открыт раздел соцсетей, остальные инструменты готовятся к запуску.</p>
+          <p>Выберите направление. Сейчас доступны контент-планы и анализ конкурентов.</p>
         </div>
         <div class="workspace-layout">
           <div class="workspace-actions">
@@ -1280,6 +1281,383 @@ function renderProjectWorkspace(project) {
 
   bindTopbar(renderDashboard);
   document.querySelector('[data-open-work-area="networks"]').onclick = () => renderNetworkSelection(project);
+  document.querySelector('[data-open-work-area="competitors"]').onclick = () => renderCompetitorAnalysis(project);
+}
+
+/* ---------------- Анализ конкурентов ---------------- */
+
+const COMPETITOR_COLORS = ["#5d4637", "#88915f", "#c68b72", "#6f8294", "#b3904d", "#8d6b91"];
+const COMPETITOR_LIMITS = { companies: 6, criteria: 12 };
+
+function competitorItemId(prefix) {
+  const randomPart = globalThis.crypto?.randomUUID?.().replaceAll("-", "")
+    || `${Date.now()}${Math.random().toString(16).slice(2)}`;
+  return `${prefix}_${randomPart}`;
+}
+
+function blankCompetitorAnalysis() {
+  const companies = [
+    { id: competitorItemId("company"), name: "Ваша компания" },
+    { id: competitorItemId("company"), name: "Конкурент 1" },
+  ];
+  return {
+    companies,
+    criteria: Array.from({ length: 3 }, () => ({
+      id: competitorItemId("criterion"),
+      name: "",
+      notes: Object.fromEntries(companies.map((company) => [company.id, ""])),
+      scores: Object.fromEntries(companies.map((company) => [company.id, 0])),
+    })),
+  };
+}
+
+function normalizeCompetitorAnalysis(data) {
+  if (!data || !Array.isArray(data.companies) || !Array.isArray(data.criteria)) return blankCompetitorAnalysis();
+  const seenCompanyIds = new Set();
+  const companies = data.companies.slice(0, COMPETITOR_LIMITS.companies).map((company) => {
+    const storedId = typeof company?.id === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(company.id)
+      ? company.id
+      : competitorItemId("company");
+    const id = seenCompanyIds.has(storedId) ? competitorItemId("company") : storedId;
+    seenCompanyIds.add(id);
+    return { id, name: String(company?.name || "").slice(0, 80) };
+  });
+  while (companies.length < 2) companies.push({ id: competitorItemId("company"), name: companies.length ? "Конкурент 1" : "Ваша компания" });
+
+  const seenCriterionIds = new Set();
+  const criteria = data.criteria.slice(0, COMPETITOR_LIMITS.criteria).map((criterion) => {
+    const storedId = typeof criterion?.id === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(criterion.id)
+      ? criterion.id
+      : competitorItemId("criterion");
+    const id = seenCriterionIds.has(storedId) ? competitorItemId("criterion") : storedId;
+    seenCriterionIds.add(id);
+    return {
+      id,
+      name: String(criterion?.name || "").slice(0, 100),
+      notes: Object.fromEntries(companies.map((company) => [
+        company.id,
+        String(criterion?.notes?.[company.id] || "").slice(0, 1000),
+      ])),
+      scores: Object.fromEntries(companies.map((company) => [
+        company.id,
+        Math.min(5, Math.max(0, Math.round(Number(criterion?.scores?.[company.id]) || 0))),
+      ])),
+    };
+  });
+  if (!criteria.length) {
+    criteria.push({
+      id: competitorItemId("criterion"),
+      name: "",
+      notes: Object.fromEntries(companies.map((company) => [company.id, ""])),
+      scores: Object.fromEntries(companies.map((company) => [company.id, 0])),
+    });
+  }
+  return { companies, criteria };
+}
+
+function syncCompetitorDraft(draft, root = document) {
+  root.querySelectorAll("[data-company-name]").forEach((input) => {
+    const company = draft.companies.find((item) => item.id === input.dataset.companyName);
+    if (company) company.name = input.value;
+  });
+  root.querySelectorAll("[data-criterion-name]").forEach((input) => {
+    const criterion = draft.criteria.find((item) => item.id === input.dataset.criterionName);
+    if (criterion) criterion.name = input.value;
+  });
+  root.querySelectorAll("[data-competitor-note]").forEach((input) => {
+    const criterion = draft.criteria.find((item) => item.id === input.dataset.criterionId);
+    if (criterion) criterion.notes[input.dataset.companyId] = input.value;
+  });
+  root.querySelectorAll("[data-competitor-score]").forEach((input) => {
+    const criterion = draft.criteria.find((item) => item.id === input.dataset.criterionId);
+    if (criterion) criterion.scores[input.dataset.companyId] = Math.min(5, Math.max(0, Math.round(Number(input.value) || 0)));
+  });
+}
+
+function competitorRadarMarkup(draft) {
+  const criteria = draft.criteria.filter((criterion) => criterion.name.trim());
+  if (criteria.length < 3) {
+    return `<div class="competitor-chart-empty">
+      <strong>Диаграмма появится после заполнения</strong>
+      <span>Укажите минимум три критерия и оценки от 0 до 5.</span>
+    </div>`;
+  }
+
+  const width = 760;
+  const height = 540;
+  const centerX = 285;
+  const centerY = 270;
+  const radius = 180;
+  const point = (index, value) => {
+    const angle = -Math.PI / 2 + (Math.PI * 2 * index) / criteria.length;
+    const distance = radius * value / 5;
+    return [centerX + Math.cos(angle) * distance, centerY + Math.sin(angle) * distance];
+  };
+  const pointsString = (values) => values.map((value, index) => point(index, value).map((part) => part.toFixed(1)).join(",")).join(" ");
+  const levels = Array.from({ length: 5 }, (_, index) => index + 1);
+
+  return `<div class="competitor-chart-scroll">
+    <svg class="competitor-radar" viewBox="0 0 ${width} ${height}" role="img" aria-label="Диаграмма сравнения компаний по ${criteria.length} критериям">
+      <g class="radar-grid">
+        ${levels.map((level) => `<polygon points="${pointsString(criteria.map(() => level))}" />`).join("")}
+        ${criteria.map((criterion, index) => {
+          const [x, y] = point(index, 5);
+          return `<line x1="${centerX}" y1="${centerY}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" />`;
+        }).join("")}
+      </g>
+      <g class="radar-scale" aria-hidden="true">
+        ${levels.map((level) => `<text x="${centerX + 7}" y="${(centerY - radius * level / 5 + 4).toFixed(1)}">${level}</text>`).join("")}
+      </g>
+      <g class="radar-labels">
+        ${criteria.map((criterion, index) => {
+          const angle = -Math.PI / 2 + (Math.PI * 2 * index) / criteria.length;
+          const labelRadius = radius + 28;
+          const x = centerX + Math.cos(angle) * labelRadius;
+          const y = centerY + Math.sin(angle) * labelRadius;
+          const anchor = Math.cos(angle) > 0.25 ? "start" : Math.cos(angle) < -0.25 ? "end" : "middle";
+          const label = criterion.name.trim();
+          const shortLabel = label.length > 24 ? `${label.slice(0, 22)}…` : label;
+          return `<text x="${x.toFixed(1)}" y="${(y + 5).toFixed(1)}" text-anchor="${anchor}"><title>${esc(label)}</title>${esc(shortLabel)}</text>`;
+        }).join("")}
+      </g>
+      <g class="radar-series">
+        ${draft.companies.map((company, companyIndex) => {
+          const color = COMPETITOR_COLORS[companyIndex];
+          const values = criteria.map((criterion) => criterion.scores[company.id] || 0);
+          return `<g style="--series-color:${color}">
+            <polygon points="${pointsString(values)}" />
+            ${values.map((value, index) => {
+              const [x, y] = point(index, value);
+              return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4"><title>${esc(company.name || `Компания ${companyIndex + 1}`)}: ${value}</title></circle>`;
+            }).join("")}
+          </g>`;
+        }).join("")}
+      </g>
+      <g class="radar-legend">
+        ${draft.companies.map((company, index) => `<g transform="translate(525 ${150 + index * 42})">
+          <line x1="0" y1="0" x2="34" y2="0" style="stroke:${COMPETITOR_COLORS[index]}" />
+          <circle cx="17" cy="0" r="4" style="fill:${COMPETITOR_COLORS[index]}" />
+          <text x="46" y="5"><title>${esc(company.name || `Компания ${index + 1}`)}</title>${esc((company.name || `Компания ${index + 1}`).slice(0, 23))}</text>
+        </g>`).join("")}
+      </g>
+    </svg>
+  </div>`;
+}
+
+function validateCompetitorDraft(draft, root) {
+  const companies = draft.companies.map((company) => company.name.trim());
+  const criteria = draft.criteria.map((criterion) => criterion.name.trim());
+  const duplicate = (values) => {
+    const normalized = values.map((value) => value.toLocaleLowerCase("ru-RU"));
+    return normalized.findIndex((value, index) => value && normalized.indexOf(value) !== index);
+  };
+  const emptyCompany = companies.findIndex((name) => !name);
+  const emptyCriterion = criteria.findIndex((name) => !name);
+  const duplicateCompany = duplicate(companies);
+  const duplicateCriterion = duplicate(criteria);
+  let input = null;
+  let message = "";
+  if (emptyCompany >= 0) {
+    input = root.querySelector(`[data-company-name="${draft.companies[emptyCompany].id}"]`);
+    message = "Назовите каждую сравниваемую компанию.";
+  } else if (emptyCriterion >= 0) {
+    input = root.querySelector(`[data-criterion-name="${draft.criteria[emptyCriterion].id}"]`);
+    message = "Заполните название каждого критерия.";
+  } else if (duplicateCompany >= 0) {
+    input = root.querySelector(`[data-company-name="${draft.companies[duplicateCompany].id}"]`);
+    message = "Названия компаний не должны повторяться.";
+  } else if (duplicateCriterion >= 0) {
+    input = root.querySelector(`[data-criterion-name="${draft.criteria[duplicateCriterion].id}"]`);
+    message = "Названия критериев не должны повторяться.";
+  }
+  if (input) {
+    input.focus();
+    input.setAttribute("aria-invalid", "true");
+    return message;
+  }
+  return "";
+}
+
+async function renderCompetitorAnalysis(project) {
+  loader("Загружаю анализ конкурентов…");
+  const analysisRef = doc(db, "projects", project.id, "competitorAnalyses", "main");
+  let snapshot;
+  try {
+    snapshot = await getDoc(analysisRef);
+  } catch (error) {
+    app.innerHTML = `<section class="screen flow-screen">${pageTopbar("К проекту")}<div class="flow-card card"><h1>Анализ конкурентов</h1><div data-message><p class="error">${esc(readError(error))}</p></div></div></section>`;
+    bindTopbar(() => renderProjectWorkspace(project));
+    return;
+  }
+  const editable = canEdit(project.role);
+  let hasSavedAnalysis = snapshot.exists();
+  const draft = hasSavedAnalysis ? normalizeCompetitorAnalysis(snapshot.data()) : blankCompetitorAnalysis();
+
+  app.innerHTML = `
+    <section class="screen flow-screen competitors-screen">
+      ${pageTopbar("К проекту")}
+      <header class="competitor-page-heading">
+        <p class="step-indicator">Исследование рынка</p>
+        <h1>Анализ конкурентов</h1>
+        <p class="subtitle">Создайте собственные критерии, добавьте компании и запишите наблюдения. Оценки от 0 до 5 автоматически складываются в диаграмму.</p>
+      </header>
+      ${!hasSavedAnalysis && !editable ? `<div class="flow-card card activity-empty"><h2>Анализа пока нет</h2><p class="muted">Владелец или редактор проекта сможет создать сравнение конкурентов.</p></div>` : `
+        <form class="competitor-analysis-form" data-competitor-form>
+          <section class="card competitor-editor-card">
+            <div class="competitor-section-heading">
+              <div><h2>Критерии и наблюдения</h2><p class="muted">Текст — для деталей, оценка — для итоговой диаграммы.</p></div>
+              ${editable ? `<div class="competitor-editor-actions">
+                <button class="button ghost small" type="button" data-add-company>+ Компания</button>
+                <button class="button ghost small" type="button" data-add-criterion>+ Критерий</button>
+              </div>` : ""}
+            </div>
+            <div class="competitor-table-scroll" data-competitor-table></div>
+            ${editable ? `<div class="competitor-save-row">
+              <span class="muted">До ${COMPETITOR_LIMITS.companies} компаний и ${COMPETITOR_LIMITS.criteria} критериев</span>
+              <button class="button primary" type="submit">Сохранить анализ</button>
+            </div><div data-message></div>` : ""}
+          </section>
+          <section class="card competitor-chart-card">
+            <div class="competitor-section-heading"><div><p class="step-indicator">Итог</p><h2>Карта сравнения</h2><p class="muted">Чем дальше точка от центра, тем выше оценка по критерию.</p></div></div>
+            <div data-competitor-chart></div>
+          </section>
+        </form>`}
+    </section>`;
+  bindTopbar(() => renderProjectWorkspace(project));
+  if (!hasSavedAnalysis && !editable) return;
+
+  const form = document.querySelector("[data-competitor-form]");
+  const drawChart = () => {
+    form.querySelector("[data-competitor-chart]").innerHTML = competitorRadarMarkup(draft);
+  };
+  const drawTable = () => {
+    const tableRoot = form.querySelector("[data-competitor-table]");
+    tableRoot.innerHTML = `<table class="competitor-table" style="min-width:${220 + draft.companies.length * 270}px">
+      <thead><tr>
+        <th scope="col"><span class="competitor-table-label">Критерий сравнения</span></th>
+        ${draft.companies.map((company, companyIndex) => `<th scope="col">
+          <div class="competitor-company-heading">
+            <span class="competitor-color" style="background:${COMPETITOR_COLORS[companyIndex]}" aria-hidden="true"></span>
+            ${editable
+              ? `<input data-company-name="${company.id}" value="${esc(company.name)}" maxlength="80" aria-label="Название компании ${companyIndex + 1}" placeholder="Название компании">
+                ${draft.companies.length > 2 ? `<button class="icon-button" type="button" data-remove-company="${company.id}" aria-label="Удалить компанию ${esc(company.name || companyIndex + 1)}">×</button>` : ""}`
+              : `<strong>${esc(company.name)}</strong>`}
+          </div>
+        </th>`).join("")}
+      </tr></thead>
+      <tbody>${draft.criteria.map((criterion, criterionIndex) => `<tr>
+        <th scope="row"><div class="competitor-criterion-heading">
+          ${editable
+            ? `<input data-criterion-name="${criterion.id}" value="${esc(criterion.name)}" maxlength="100" aria-label="Критерий ${criterionIndex + 1}" placeholder="Например, цена">
+              ${draft.criteria.length > 1 ? `<button class="icon-button" type="button" data-remove-criterion="${criterion.id}" aria-label="Удалить критерий ${esc(criterion.name || criterionIndex + 1)}">×</button>` : ""}`
+            : `<strong>${esc(criterion.name)}</strong>`}
+        </div></th>
+        ${draft.companies.map((company) => `<td>
+          ${editable
+            ? `<textarea data-competitor-note data-criterion-id="${criterion.id}" data-company-id="${company.id}" maxlength="1000" aria-label="Наблюдение: ${esc(criterion.name || `критерий ${criterionIndex + 1}`)}, ${esc(company.name)}" placeholder="Факты, особенности, выводы…">${esc(criterion.notes[company.id])}</textarea>
+              <label class="competitor-score">Оценка <input type="number" min="0" max="5" step="1" inputmode="numeric" data-competitor-score data-criterion-id="${criterion.id}" data-company-id="${company.id}" value="${criterion.scores[company.id]}"><span>из 5</span></label>`
+            : `<p class="competitor-note-readonly">${esc(criterion.notes[company.id]) || '<span class="muted">Нет заметки</span>'}</p><span class="competitor-score-badge">${criterion.scores[company.id]} / 5</span>`}
+        </td>`).join("")}
+      </tr>`).join("")}</tbody>
+    </table>`;
+
+    tableRoot.querySelectorAll("input, textarea").forEach((input) => {
+      input.addEventListener("input", () => {
+        input.removeAttribute("aria-invalid");
+        syncCompetitorDraft(draft, form);
+        drawChart();
+      });
+    });
+    tableRoot.querySelectorAll("[data-remove-company]").forEach((button) => {
+      button.onclick = () => {
+        syncCompetitorDraft(draft, form);
+        draft.companies = draft.companies.filter((company) => company.id !== button.dataset.removeCompany);
+        draft.criteria.forEach((criterion) => {
+          delete criterion.notes[button.dataset.removeCompany];
+          delete criterion.scores[button.dataset.removeCompany];
+        });
+        drawTable();
+        drawChart();
+      };
+    });
+    tableRoot.querySelectorAll("[data-remove-criterion]").forEach((button) => {
+      button.onclick = () => {
+        syncCompetitorDraft(draft, form);
+        draft.criteria = draft.criteria.filter((criterion) => criterion.id !== button.dataset.removeCriterion);
+        drawTable();
+        drawChart();
+      };
+    });
+  };
+
+  form.querySelector("[data-add-company]")?.addEventListener("click", () => {
+    if (draft.companies.length >= COMPETITOR_LIMITS.companies) {
+      showMessage(`Можно сравнить не более ${COMPETITOR_LIMITS.companies} компаний.`, "error", form);
+      return;
+    }
+    syncCompetitorDraft(draft, form);
+    const company = { id: competitorItemId("company"), name: `Конкурент ${draft.companies.length}` };
+    draft.companies.push(company);
+    draft.criteria.forEach((criterion) => {
+      criterion.notes[company.id] = "";
+      criterion.scores[company.id] = 0;
+    });
+    drawTable();
+    drawChart();
+    form.querySelector(`[data-company-name="${company.id}"]`)?.select();
+  });
+  form.querySelector("[data-add-criterion]")?.addEventListener("click", () => {
+    if (draft.criteria.length >= COMPETITOR_LIMITS.criteria) {
+      showMessage(`Можно добавить не более ${COMPETITOR_LIMITS.criteria} критериев.`, "error", form);
+      return;
+    }
+    syncCompetitorDraft(draft, form);
+    const criterion = {
+      id: competitorItemId("criterion"),
+      name: "",
+      notes: Object.fromEntries(draft.companies.map((company) => [company.id, ""])),
+      scores: Object.fromEntries(draft.companies.map((company) => [company.id, 0])),
+    };
+    draft.criteria.push(criterion);
+    drawTable();
+    drawChart();
+    form.querySelector(`[data-criterion-name="${criterion.id}"]`)?.focus();
+  });
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    syncCompetitorDraft(draft, form);
+    const validationMessage = validateCompetitorDraft(draft, form);
+    if (validationMessage) {
+      showMessage(validationMessage, "error", form);
+      return;
+    }
+    const progress = beginFormProgress(form, "Сохраняю анализ…", 1);
+    if (!progress) return;
+    try {
+      const payload = {
+        companies: draft.companies.map((company) => ({ id: company.id, name: company.name.trim() })),
+        criteria: draft.criteria.map((criterion) => ({
+          id: criterion.id,
+          name: criterion.name.trim(),
+          notes: Object.fromEntries(draft.companies.map((company) => [company.id, criterion.notes[company.id].trim()])),
+          scores: Object.fromEntries(draft.companies.map((company) => [company.id, criterion.scores[company.id]])),
+        })),
+        updatedBy: user.uid,
+        updatedAt: serverTimestamp(),
+      };
+      if (!hasSavedAnalysis) payload.createdAt = serverTimestamp();
+      await setDoc(analysisRef, payload, { merge: true });
+      hasSavedAnalysis = true;
+      progress.advance("Анализ сохранён");
+      showMessage("Анализ конкурентов сохранён.", "success", form);
+    } catch (error) {
+      showMessage(readError(error), "error", form);
+    } finally {
+      progress.finish();
+    }
+  };
+  drawTable();
+  drawChart();
 }
 
 async function getNetworks(projectId) {
@@ -1719,11 +2097,11 @@ async function deleteProject(project) {
   await updateDoc(projectRef, { deletingAt: serverTimestamp(), updatedAt: serverTimestamp() });
   try {
     const snapshots = [];
-    for (const subcollection of ["networks", "rubrics", "posts", "postImages", "comments", "activity"]) {
+    for (const subcollection of ["networks", "rubrics", "posts", "postImages", "comments", "competitorAnalyses", "activity"]) {
       try {
         snapshots.push(await getDocs(collection(db, "projects", project.id, subcollection)));
       } catch (error) {
-        if (["postImages", "activity"].includes(subcollection) && error?.code === "permission-denied") {
+        if (["postImages", "competitorAnalyses", "activity"].includes(subcollection) && error?.code === "permission-denied") {
           throw new Error("Firestore не разрешил удалить связанные данные. Опубликуйте актуальный файл firestore.rules в Firebase и повторите удаление.");
         }
         throw error;
