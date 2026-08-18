@@ -901,7 +901,7 @@ async function renderDashboard() {
   document.querySelector("[data-create-project]").onclick = renderCreateProject;
   document.querySelector("[data-join-project]").onclick = openJoinModal;
   document.querySelectorAll("[data-open-project]").forEach((button) => {
-    button.onclick = () => renderNetworkSelection(projectById(button.dataset.openProject));
+    button.onclick = () => renderProjectWorkspace(projectById(button.dataset.openProject));
   });
   document.querySelectorAll("[data-project-more]").forEach((button) => {
     button.onclick = (event) => {
@@ -952,7 +952,7 @@ function openJoinModal() {
       });
       modal.remove();
       await loadProjects();
-      renderNetworkSelection(projectById(invitation.projectId));
+      renderProjectWorkspace(projectById(invitation.projectId));
     } catch (error) {
       showMessage(readError(error), "error", modal);
     }
@@ -1177,7 +1177,7 @@ function renderCreateProject() {
         }
         await loadProjects();
         progress.advance("Проект готов");
-        await renderNetworkSelection(projectById(projectDoc.id));
+        renderProjectWorkspace(projectById(projectDoc.id));
       } catch (error) {
         showMessage(readError(error), "error", form);
       } finally {
@@ -1198,6 +1198,83 @@ async function uniqueCode() {
 }
 
 /* ---------------- Соцсети и рубрики ---------------- */
+
+function renderProjectWorkspace(project) {
+  const workAreas = [
+    {
+      key: "networks",
+      number: "01",
+      title: "Соцсети",
+      description: "Контент-планы, рубрики и публикации",
+      available: true,
+    },
+    {
+      key: "audience",
+      number: "02",
+      title: "Целевая аудитория",
+      description: "Сегменты, потребности и портреты",
+    },
+    {
+      key: "competitors",
+      number: "03",
+      title: "Конкуренты",
+      description: "Сравнение позиционирования и контента",
+    },
+    {
+      key: "audit",
+      number: "04",
+      title: "Аудит",
+      description: "Проверка текущих площадок и материалов",
+    },
+    {
+      key: "references",
+      number: "05",
+      title: "Референсы",
+      description: "Примеры, идеи и визуальные ориентиры",
+    },
+  ];
+
+  app.innerHTML = `
+    <section class="screen flow-screen workspace-screen">
+      ${pageTopbar("Все проекты")}
+      <div class="workspace-project-label">Проект</div>
+      <h1 class="workspace-project-title">${esc(project.name)}</h1>
+      <div class="project-workspace card">
+        <div class="workspace-heading">
+          <p class="step-indicator">Рабочее пространство</p>
+          <h2>Над чем поработаем?</h2>
+          <p>Выберите направление. Сейчас открыт раздел соцсетей, остальные инструменты готовятся к запуску.</p>
+        </div>
+        <div class="workspace-layout">
+          <div class="workspace-actions">
+            ${workAreas.map((area) => `
+              <button
+                type="button"
+                class="workspace-action${area.available ? " workspace-action-active" : ""}"
+                ${area.available ? `data-open-work-area="${area.key}"` : "disabled"}
+              >
+                <span class="workspace-action-number">${area.number}</span>
+                <span class="workspace-action-copy">
+                  <strong>${area.title}</strong>
+                  <small>${area.description}</small>
+                </span>
+                <span class="workspace-action-state">${area.available ? "Открыть →" : "Скоро"}</span>
+              </button>`).join("")}
+          </div>
+          <aside class="workspace-ollie">
+            ${dashboardOliveMarkup()}
+            <div class="workspace-ollie-note">
+              <strong>Олли уже здесь</strong>
+              <span>Поможет собрать всё по проекту в одном месте.</span>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </section>`;
+
+  bindTopbar(renderDashboard);
+  document.querySelector('[data-open-work-area="networks"]').onclick = () => renderNetworkSelection(project);
+}
 
 async function getNetworks(projectId) {
   const snapshot = await getDocs(collection(db, "projects", projectId, "networks"));
@@ -1502,7 +1579,7 @@ async function renderNetworkSelection(project) {
         </article>`).join("") || '<div class="card flow-card"><p>В проекте пока нет соцсетей.</p></div>'}
       </div>
     </section>`;
-  bindTopbar(renderDashboard);
+  bindTopbar(() => renderProjectWorkspace(project));
   document.querySelector("[data-activity]").onclick = () => renderActivity(project);
   document.querySelector("[data-network-settings]")?.addEventListener("click", () => renderNetworkSettings(project));
   document.querySelector("[data-access]")?.addEventListener("click", () => renderAccess(project));
