@@ -6,9 +6,6 @@ import {
   signOut,
   updateProfile,
   onAuthStateChanged,
-  sendEmailVerification,
-  checkActionCode,
-  applyActionCode,
 } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import {
   getFirestore,
@@ -42,8 +39,6 @@ const auth = getAuth(firebaseApp);
 auth.languageCode = "ru";
 const db = getFirestore(firebaseApp);
 const app = document.querySelector("#app");
-const startupParams = new URLSearchParams(window.location.search);
-const emailVerificationCode = startupParams.get("mode") === "verifyEmail" ? startupParams.get("oobCode") || "" : null;
 
 const ROLE_LABELS = {
   owner: "Владелец",
@@ -129,8 +124,6 @@ function readError(error) {
     "auth/email-already-in-use": "Этот email уже зарегистрирован. Войдите в аккаунт.",
     "auth/invalid-email": "Проверьте формат email.",
     "auth/invalid-credential": "Неверный email или пароль.",
-    "auth/expired-action-code": "Срок действия ссылки истёк. Запросите новое письмо подтверждения.",
-    "auth/invalid-action-code": "Ссылка подтверждения недействительна или уже была использована.",
     "auth/network-request-failed": "Не удалось подключиться к серверу. Проверьте интернет и повторите попытку.",
     "auth/too-many-requests": "Слишком много попыток. Подождите немного и повторите действие.",
     "auth/user-disabled": "Этот аккаунт отключён.",
@@ -263,7 +256,7 @@ function accountMarkup({ showHome = true } = {}) {
     <div class="account-wrap">
       <button class="account-button" data-account aria-label="Открыть меню аккаунта">${esc(initials())}</button>
       <div class="account-menu hidden" data-account-menu>
-        <div class="account-name"><strong>${esc(user?.displayName || "Аккаунт")}</strong><br><small>${esc(user?.email || "")}</small>${user?.emailVerified ? '<span class="verified-email">✓ Email подтверждён</span>' : ""}</div>
+        <div class="account-name"><strong>${esc(user?.displayName || "Аккаунт")}</strong><br><small>${esc(user?.email || "")}</small></div>
         ${showHome ? "<button data-go-home>Выйти на главный экран</button>" : ""}
         <button data-signout>Выйти из аккаунта</button>
       </div>
@@ -334,28 +327,6 @@ function openModal(title, content, size = "") {
 
 /* ---------------- Авторизация ---------------- */
 
-function verificationOlivesMarkup() {
-  const olive = (variant) => `
-    <svg class="verification-olive verification-olive-${variant}" viewBox="0 0 76 104" aria-hidden="true">
-      <ellipse class="verification-olive-shadow" cx="38" cy="97" rx="20" ry="4" />
-      <g class="verification-olive-character">
-        <g class="verification-olive-leg verification-olive-leg-left"><path d="M30 78c-1 9-5 14-11 18" /><path d="M19 96h-7" /></g>
-        <g class="verification-olive-leg verification-olive-leg-right"><path d="M46 78c1 9 5 14 11 18" /><path d="M57 96h7" /></g>
-        <g class="verification-olive-arm verification-olive-arm-left"><path d="M21 42C11 38 8 32 7 25" /><path d="M7 25 2 30M7 25l5 3" /></g>
-        <g class="verification-olive-arm verification-olive-arm-right"><path d="M55 42c10-4 13-10 14-17" /><path d="m69 25-5 5m5-5 5 3" /></g>
-        <path class="verification-olive-body" d="M38 8c17 0 27 18 27 39 0 23-10 35-27 35S11 70 11 47C11 26 21 8 38 8Z" />
-        <path class="verification-olive-shine" d="M22 25c4-8 9-12 15-14-6 10-9 19-10 28-6-3-8-8-5-14Z" />
-        <ellipse class="verification-olive-opening" cx="38" cy="10" rx="10" ry="4" />
-        <ellipse class="verification-olive-pimento" cx="38" cy="10" rx="6" ry="2.5" />
-        <ellipse class="verification-olive-eye" cx="29" cy="45" rx="2.4" ry="3.3" />
-        <ellipse class="verification-olive-eye" cx="47" cy="45" rx="2.4" ry="3.3" />
-        <path class="verification-olive-mouth" d="M30 57q8 10 16 0" />
-      </g>
-    </svg>`;
-
-  return `<div class="verification-olives" aria-hidden="true">${olive("one")}${olive("two")}${olive("three")}</div>`;
-}
-
 function dashboardOliveMarkup() {
   return `
     <div class="dashboard-olive-scene" aria-hidden="true">
@@ -396,79 +367,6 @@ function dashboardOliveMarkup() {
         </g>
       </svg>
     </div>`;
-}
-
-function renderEmailActionState(state, message = "") {
-  const states = {
-    loading: {
-      eyebrow: "Проверяем ссылку",
-      title: "Секундочку…",
-      copy: "Убеждаемся, что ссылка подтверждения ещё действует.",
-      action: '<span class="email-action-loader" aria-hidden="true"></span>',
-    },
-    ready: {
-      eyebrow: "Один короткий шаг",
-      title: "Подтвердите email",
-      copy: "Нажмите кнопку — и адрес будет привязан к вашему аккаунту.",
-      action: '<button class="button primary email-action-button" data-complete-verification>Подтвердить адрес</button>',
-    },
-    success: {
-      eyebrow: "Готово!",
-      title: "Email подтверждён",
-      copy: "Теперь можно вернуться в Контент-план и продолжить работу.",
-      action: `<a class="button primary email-action-button" href="./">${auth.currentUser ? "Перейти к проектам" : "Войти в аккаунт"}</a>`,
-    },
-    error: {
-      eyebrow: "Не получилось",
-      title: "Ссылка не сработала",
-      copy: message,
-      action: '<a class="button primary email-action-button" href="./">Вернуться в Контент-план</a>',
-    },
-  };
-  const content = states[state];
-  app.innerHTML = `
-    <section class="screen auth-screen email-action-screen">
-      <div class="card auth-card verification-card email-action-card">
-        <p class="email-action-eyebrow">${content.eyebrow}</p>
-        ${verificationOlivesMarkup()}
-        <h1>${content.title}</h1>
-        <p class="subtitle">${esc(content.copy)}</p>
-        <div class="email-action-controls">${content.action}</div>
-      </div>
-    </section>`;
-}
-
-async function renderEmailVerificationAction(code) {
-  renderEmailActionState("loading");
-  if (!code) {
-    renderEmailActionState("error", "В ссылке не хватает кода подтверждения. Запросите новое письмо.");
-    return;
-  }
-  try {
-    await checkActionCode(auth, code);
-    renderEmailActionState("ready");
-  } catch (error) {
-    renderEmailActionState("error", readError(error));
-    return;
-  }
-
-  document.querySelector("[data-complete-verification]").onclick = async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    button.innerHTML = '<span class="button-spinner" aria-hidden="true"></span>Подтверждаем…';
-    try {
-      await applyActionCode(auth, code);
-      if (auth.currentUser) {
-        await auth.currentUser.reload();
-        await auth.currentUser.getIdToken(true);
-        user = auth.currentUser;
-      }
-      window.history.replaceState({}, document.title, window.location.pathname);
-      renderEmailActionState("success");
-    } catch (error) {
-      renderEmailActionState("error", readError(error));
-    }
-  };
 }
 
 function renderAuth(mode = "welcome") {
@@ -513,7 +411,7 @@ function renderAuth(mode = "welcome") {
   authForm.onsubmit = async (event) => {
     event.preventDefault();
     const data = new FormData(authForm);
-    const progress = beginFormProgress(authForm, isRegister ? "Создаю аккаунт…" : "Вхожу…", isRegister ? 3 : 1);
+    const progress = beginFormProgress(authForm, isRegister ? "Создаю аккаунт…" : "Вхожу…", isRegister ? 2 : 1);
     if (!progress) return;
     try {
       if (isRegister) {
@@ -527,9 +425,6 @@ function renderAuth(mode = "welcome") {
           createdAt: serverTimestamp(),
         });
         progress.advance("Профиль сохранён");
-        await sendEmailVerification(credential.user);
-        progress.advance("Письмо отправлено");
-        renderEmailVerification({ sent: true });
       } else {
         await signInWithEmailAndPassword(auth, data.get("email"), data.get("password"));
         progress.advance("Вход выполнен");
@@ -787,62 +682,6 @@ function renderLanding() {
   const updateHeader = () => header.classList.toggle("is-scrolled", window.scrollY > 18);
   updateHeader();
   window.onscroll = updateHeader;
-}
-
-function renderEmailVerification({ sent = false } = {}) {
-  app.innerHTML = `
-    <section class="screen auth-screen email-action-screen">
-      <div class="card auth-card verification-card email-action-card">
-        ${verificationOlivesMarkup()}
-        <h2>Подтвердите email</h2>
-        <p class="subtitle">Мы отправили письмо на <strong>${esc(user?.email || "указанный адрес")}</strong>. Перейдите по ссылке в письме, затем вернитесь сюда.</p>
-        <div class="verification-steps">
-          <span>1</span><p>Проверьте папки «Входящие» и «Спам».</p>
-          <span>2</span><p>Нажмите ссылку подтверждения в письме.</p>
-          <span>3</span><p>Вернитесь и нажмите кнопку ниже.</p>
-        </div>
-        <div class="auth-actions">
-          <button class="button primary" data-check-verification>Я подтвердил(а) email</button>
-          <button class="button ghost" data-resend-verification>Отправить письмо ещё раз</button>
-          <button class="link-button" data-verification-signout>Выйти из аккаунта</button>
-        </div>
-        <div data-message>${sent ? '<p class="success">Письмо отправлено. Оно может прийти в течение нескольких минут.</p>' : ""}</div>
-      </div>
-    </section>`;
-
-  document.querySelector("[data-check-verification]").onclick = async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    button.innerHTML = '<span class="button-spinner" aria-hidden="true"></span>Проверяю…';
-    try {
-      await auth.currentUser.reload();
-      await auth.currentUser.getIdToken(true);
-      user = auth.currentUser;
-      if (!user.emailVerified) throw new Error("Email пока не подтверждён. Откройте ссылку из письма и повторите проверку.");
-      loader("Открываю проекты…");
-      await continueAuthenticatedSession();
-    } catch (error) {
-      showMessage(readError(error));
-      button.disabled = false;
-      button.textContent = "Я подтвердил(а) email";
-    }
-  };
-
-  document.querySelector("[data-resend-verification]").onclick = async (event) => {
-    const button = event.currentTarget;
-    button.disabled = true;
-    button.innerHTML = '<span class="button-spinner" aria-hidden="true"></span>Отправляю…';
-    try {
-      await sendEmailVerification(auth.currentUser);
-      showMessage("Новое письмо отправлено. Проверьте также папку «Спам».", "success");
-    } catch (error) {
-      showMessage(readError(error));
-    } finally {
-      button.disabled = false;
-      button.textContent = "Отправить письмо ещё раз";
-    }
-  };
-  document.querySelector("[data-verification-signout]").onclick = () => signOut(auth);
 }
 
 /* ---------------- Данные и главный экран ---------------- */
@@ -2607,13 +2446,8 @@ async function continueAuthenticatedSession() {
 
 onAuthStateChanged(auth, async (nextUser) => {
   user = nextUser;
-  if (emailVerificationCode !== null) return;
   if (!user) {
     renderAuth();
-    return;
-  }
-  if (!user.emailVerified) {
-    renderEmailVerification();
     return;
   }
   try {
@@ -2622,5 +2456,3 @@ onAuthStateChanged(auth, async (nextUser) => {
     app.innerHTML = `<div class="loader"><div><h2>Не удалось открыть страницу</h2><p class="error">${esc(readError(error))}</p><button class="button" onclick="location.reload()">Обновить</button></div></div>`;
   }
 });
-
-if (emailVerificationCode !== null) renderEmailVerificationAction(emailVerificationCode);
