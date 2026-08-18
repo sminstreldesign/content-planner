@@ -1232,6 +1232,12 @@ function renderProjectWorkspace(project) {
       title: "Референсы",
       description: "Примеры, идеи и визуальные ориентиры",
     },
+    {
+      key: "notebook",
+      number: "06",
+      title: "Блокнот",
+      description: "Идеи, заметки и рабочие черновики",
+    },
   ];
 
   app.innerHTML = `
