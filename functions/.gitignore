@@ -1,0 +1,4 @@
+node_modules/
+.pnpm-store/
+firebase-debug.log
+firebase-debug.*.log

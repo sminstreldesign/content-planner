@@ -274,6 +274,22 @@ textarea { min-height: 105px; resize: vertical; }
 .member-actions select { min-width: 150px; }
 .member-email { font-size: 0.86rem; opacity: 0.68; }
 
+/* История проекта */
+.activity-card { max-width: 940px; margin-right: auto; margin-left: auto; }
+.activity-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 28px; }
+.activity-heading .subtitle { margin-bottom: 0; }
+.activity-count { display: grid; min-width: 46px; height: 46px; place-items: center; border-radius: 50%; background: rgba(var(--secondary-rgb), .22); font-weight: 700; }
+.activity-list { position: relative; display: grid; }
+.activity-item { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 15px; padding-bottom: 24px; }
+.activity-item:not(:last-child)::before { position: absolute; top: 14px; bottom: -2px; left: 6px; width: 2px; background: rgba(var(--secondary-rgb), .32); content: ""; }
+.activity-marker { position: relative; z-index: 1; width: 14px; height: 14px; margin-top: 5px; border: 3px solid var(--surface); border-radius: 50%; background: var(--secondary); box-shadow: 0 0 0 1px rgba(var(--secondary-rgb), .45); }
+.activity-content { min-width: 0; padding: 0 0 3px; }
+.activity-meta { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.activity-meta time { color: rgba(var(--text-rgb), .62); font-size: .84rem; }
+.activity-content p { margin: 5px 0 0; overflow-wrap: anywhere; }
+.activity-empty { padding: 38px 20px; border: 1px dashed var(--line); border-radius: 18px; text-align: center; }
+.activity-empty h2 { margin-bottom: 6px; }
+
 /* Контент-план */
 .plan-screen { min-height: 100vh; padding: 12px 18px 24px; background: var(--background); }
 .plan-header { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 20px; align-items: start; margin: 12px 0; }
@@ -518,6 +534,8 @@ textarea { min-height: 105px; resize: vertical; }
   .rubric-editor-row { grid-template-columns: 1fr 40px; }
   .rubric-editor-row .checkbox-list { grid-column: 1 / -1; }
   .member-row { grid-template-columns: 1fr; }
+  .network-select-header { flex-direction: column; }
+  .network-select-header .plan-tools { width: 100%; }
   .welcome-hero { grid-template-columns: 1fr; gap: 0; min-height: 0; }
   .welcome-copy h1 { font-size: clamp(2.15rem, 7vw, 3.4rem); }
   .dashboard-olive-scene { width: min(78vw, 340px); margin-top: -8px; transform: translate3d(0, 0, 65px) scale(1.04); }
@@ -530,6 +548,7 @@ textarea { min-height: 105px; resize: vertical; }
   .welcome-copy h1 { font-size: clamp(1.45rem, 7.4vw, 2.15rem); letter-spacing: -.05em; }
   .dashboard-olive-scene { width: min(82vw, 280px); }
   .custom-network { flex-direction: column; }
+  .activity-heading { align-items: center; }
   .plan-screen { padding: 12px; }
   .plan-header { grid-template-columns: 1fr; }
   .post-form-toolbar { align-items: stretch; flex-direction: column; }

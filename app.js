@@ -20,9 +20,12 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   writeBatch,
   query,
   where,
+  orderBy,
+  limit,
   serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
@@ -107,6 +110,18 @@ function formatDate(iso) {
   return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit" }).format(
     new Date(`${iso}T12:00:00`),
   );
+}
+
+function formatActivityDate(timestamp) {
+  const date = timestamp?.toDate?.();
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "Только что";
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 }
 
 function readError(error) {
@@ -1470,7 +1485,10 @@ async function renderNetworkSelection(project) {
       ${pageTopbar("Все проекты")}
       <div class="network-select-header">
         <div><h1>${esc(project.name)}</h1><p class="subtitle">Выберите соцсеть, чтобы открыть её контент-план.</p></div>
-        ${project.role === "owner" ? '<div class="plan-tools"><button class="button ghost" data-network-settings>Соцсети</button><button class="button" data-access>Доступ</button></div>' : ""}
+        <div class="plan-tools">
+          <button class="button ghost" data-activity>История</button>
+          ${project.role === "owner" ? '<button class="button ghost" data-network-settings>Соцсети</button><button class="button" data-access>Доступ</button>' : ""}
+        </div>
       </div>
       <div data-message></div>
       <div class="network-grid">
@@ -1485,6 +1503,7 @@ async function renderNetworkSelection(project) {
       </div>
     </section>`;
   bindTopbar(renderDashboard);
+  document.querySelector("[data-activity]").onclick = () => renderActivity(project);
   document.querySelector("[data-network-settings]")?.addEventListener("click", () => renderNetworkSettings(project));
   document.querySelector("[data-access]")?.addEventListener("click", () => renderAccess(project));
   document.querySelectorAll("[data-network-assignee]").forEach((select) => {
@@ -1520,6 +1539,46 @@ async function renderNetworkSelection(project) {
 }
 
 /* ---------------- Настройки и доступ ---------------- */
+
+async function renderActivity(project) {
+  loader("Загружаю историю…");
+  try {
+    const activitySnapshot = await getDocs(query(
+      collection(db, "projects", project.id, "activity"),
+      orderBy("createdAt", "desc"),
+      limit(100),
+    ));
+    const activities = activitySnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    app.innerHTML = `
+      <section class="screen flow-screen">
+        ${pageTopbar("К проекту")}
+        <div class="flow-card card activity-card">
+          <div class="activity-heading">
+            <div><h1>История проекта</h1><p class="subtitle">Последние 100 действий участников. Записи формируются на сервере и не редактируются через приложение.</p></div>
+            <span class="activity-count" aria-label="Показано событий: ${activities.length}">${activities.length}</span>
+          </div>
+          <div class="activity-list">
+            ${activities.length ? activities.map((activity) => `
+              <article class="activity-item">
+                <span class="activity-marker" aria-hidden="true"></span>
+                <div class="activity-content">
+                  <div class="activity-meta"><strong>${esc(activity.actorName || "Система")}</strong><time>${esc(formatActivityDate(activity.createdAt))}</time></div>
+                  <p>${esc(activity.summary || "Изменены данные проекта.")}</p>
+                </div>
+              </article>`).join("") : '<div class="activity-empty"><h2>Действий пока нет</h2><p class="muted">Новые записи появятся здесь после развёртывания серверной функции истории.</p></div>'}
+          </div>
+        </div>
+      </section>`;
+    bindTopbar(() => renderNetworkSelection(project));
+  } catch (error) {
+    app.innerHTML = `
+      <section class="screen flow-screen">
+        ${pageTopbar("К проекту")}
+        <div class="flow-card card narrow"><h1>История недоступна</h1><p>${esc(readError(error))}</p><p class="muted">Опубликуйте актуальные правила Firestore и повторите попытку.</p></div>
+      </section>`;
+    bindTopbar(() => renderNetworkSelection(project));
+  }
+}
 
 async function renderProjectSettings(project) {
   app.innerHTML = `
@@ -1572,35 +1631,50 @@ async function renderProjectSettings(project) {
 }
 
 async function deleteProject(project) {
-  const snapshots = [];
-  for (const subcollection of ["networks", "rubrics", "posts", "postImages", "comments"]) {
-    try {
-      snapshots.push(await getDocs(collection(db, "projects", project.id, subcollection)));
-    } catch (error) {
-      if (subcollection === "postImages" && error?.code === "permission-denied") {
-        throw new Error("Firestore не разрешил удалить изображения. Опубликуйте актуальный файл firestore.rules в Firebase и повторите удаление.");
+  const projectRef = doc(db, "projects", project.id);
+  let projectDeleted = false;
+  await updateDoc(projectRef, { deletingAt: serverTimestamp(), updatedAt: serverTimestamp() });
+  try {
+    const snapshots = [];
+    for (const subcollection of ["networks", "rubrics", "posts", "postImages", "comments", "activity"]) {
+      try {
+        snapshots.push(await getDocs(collection(db, "projects", project.id, subcollection)));
+      } catch (error) {
+        if (["postImages", "activity"].includes(subcollection) && error?.code === "permission-denied") {
+          throw new Error("Firestore не разрешил удалить связанные данные. Опубликуйте актуальный файл firestore.rules в Firebase и повторите удаление.");
+        }
+        throw error;
       }
-      throw error;
     }
+    for (const snapshot of snapshots) {
+      for (const item of snapshot.docs) await deleteDoc(item.ref);
+    }
+    const members = await getDocs(query(collection(db, "memberships"), where("projectId", "==", project.id)));
+    const expectedOwnerMembershipId = `${project.id}_${user.uid}`;
+    const ownerMembership = members.docs.find((item) => item.id === expectedOwnerMembershipId)
+      || members.docs.find((item) => item.data().userId === user.uid && item.data().role === "owner");
+    if (!ownerMembership) throw new Error("Не найдена запись владельца проекта. Обновите страницу и повторите удаление.");
+    for (const member of members.docs) {
+      if (member.id !== ownerMembership.id) await deleteDoc(member.ref);
+    }
+    if (project.shareCode) {
+      const invitationRef = doc(db, "invitations", project.shareCode);
+      const invitationSnapshot = await getDoc(invitationRef);
+      if (invitationSnapshot.exists()) await deleteDoc(invitationRef);
+    }
+    await deleteDoc(projectRef);
+    projectDeleted = true;
+    await deleteDoc(ownerMembership.ref);
+  } catch (error) {
+    if (!projectDeleted) {
+      try {
+        await updateDoc(projectRef, { deletingAt: deleteField(), updatedAt: serverTimestamp() });
+      } catch {
+        // Сохраняем исходную ошибку удаления; повторная попытка доступна после перезагрузки.
+      }
+    }
+    throw error;
   }
-  for (const snapshot of snapshots) {
-    for (const item of snapshot.docs) await deleteDoc(item.ref);
-  }
-  const members = await getDocs(query(collection(db, "memberships"), where("projectId", "==", project.id)));
-  const expectedOwnerMembershipId = `${project.id}_${user.uid}`;
-  const ownerMembership = members.docs.find((item) => item.id === expectedOwnerMembershipId)
-    || members.docs.find((item) => item.data().userId === user.uid && item.data().role === "owner");
-  if (!ownerMembership) throw new Error("Не найдена запись владельца проекта. Обновите страницу и повторите удаление.");
-  for (const member of members.docs) {
-    if (member.id !== ownerMembership.id) await deleteDoc(member.ref);
-  }
-  if (project.shareCode) {
-    const invitationRef = doc(db, "invitations", project.shareCode);
-    const invitationSnapshot = await getDoc(invitationRef);
-    if (invitationSnapshot.exists()) await deleteDoc(invitationRef);
-  }
-  await deleteDoc(doc(db, "projects", project.id));
-  await deleteDoc(ownerMembership.ref);
 }
 
 async function renderAccess(project) {

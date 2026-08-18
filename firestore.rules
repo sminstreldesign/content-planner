@@ -79,6 +79,13 @@ service cloud.firestore {
         allow create: if hasRole(projectId, ['owner','editor']) && request.resource.data.authorId == request.auth.uid;
         allow update, delete: if isOwner(projectId);
       }
+      match /activity/{activityId} {
+        allow read: if hasRole(projectId, ['owner','editor','viewer','commenter']);
+        allow create, update: if false;
+        allow delete: if isOwner(projectId)
+          && get(/databases/$(database)/documents/projects/$(projectId)).data.keys().hasAny(['deletingAt'])
+          && get(/databases/$(database)/documents/projects/$(projectId)).data.deletingAt is timestamp;
+      }
     }
     match /invitations/{code} {
       allow get: if signedIn();
