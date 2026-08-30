@@ -3051,6 +3051,7 @@ function drawPlan(project, network, rubrics, posts) {
           <button class="button ghost small" data-zoom-in>+</button>
         </div>
       </div>
+      <div data-message></div>
       <div class="grid-scroll">
         <table class="content-grid" style="--cell-height:${Math.round(50 * planZoom)}px;--header-height:${Math.round(44 * planZoom)}px;--grid-font:${(0.92 * planZoom).toFixed(2)}rem;width:${Math.round(planZoom * 100)}%;min-width:${Math.round(gridMinWidth * planZoom)}px">
           <thead><tr><th class="date-column">Дата</th>${columns.map((rubric) => `<th>${rubric ? esc(rubric.name) : ""}</th>`).join("")}</tr></thead>
@@ -3080,10 +3081,21 @@ function drawPlan(project, network, rubrics, posts) {
   document.querySelector("[data-zoom-out]").onclick = () => { planZoom = Math.max(0.8, planZoom - 0.1); drawPlan(project, network, rubrics, posts); };
   document.querySelector("[data-zoom-in]").onclick = () => { planZoom = Math.min(1.4, planZoom + 0.1); drawPlan(project, network, rubrics, posts); };
   document.querySelectorAll("[data-post-cell]").forEach((cell) => {
-    cell.onclick = () => {
-      const post = posts.find((item) => item.id === cell.dataset.post) || null;
-      const rubric = rubrics.find((item) => item.id === cell.dataset.rubric);
-      openPostEditor({ project, network, rubric, date: cell.dataset.date, post });
+    cell.onclick = async () => {
+      if (cell.dataset.opening === "true") return;
+      cell.dataset.opening = "true";
+      cell.setAttribute("aria-busy", "true");
+      try {
+        const post = posts.find((item) => item.id === cell.dataset.post) || null;
+        const rubric = rubrics.find((item) => item.id === cell.dataset.rubric);
+        if (!rubric) throw new Error("Рубрика этой публикации больше не найдена.");
+        await openPostEditor({ project, network, rubric, date: cell.dataset.date, post });
+      } catch (error) {
+        showMessage(`Не удалось открыть публикацию: ${readError(error)}`);
+      } finally {
+        delete cell.dataset.opening;
+        cell.removeAttribute("aria-busy");
+      }
     };
   });
 }
@@ -3102,13 +3114,22 @@ async function openPostEditor({ project, network, rubric, date, post }) {
   const members = editable ? await getProjectMembers(project.id) : [];
   let comments = [];
   let postImages = [];
+  const resourceWarnings = [];
   if (post) {
-    const [commentSnapshot, imageSnapshot] = await Promise.all([
+    const [commentResult, imageResult] = await Promise.allSettled([
       getDocs(query(collection(db, "projects", project.id, "comments"), where("postId", "==", post.id))),
       getDocs(query(collection(db, "projects", project.id, "postImages"), where("postId", "==", post.id))),
     ]);
-    comments = commentSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
-    postImages = imageSnapshot.docs.map((item) => ({ id: item.id, ...item.data() }));
+    if (commentResult.status === "fulfilled") {
+      comments = commentResult.value.docs.map((item) => ({ id: item.id, ...item.data() }));
+    } else {
+      resourceWarnings.push("комментарии");
+    }
+    if (imageResult.status === "fulfilled") {
+      postImages = imageResult.value.docs.map((item) => ({ id: item.id, ...item.data() }));
+    } else {
+      resourceWarnings.push("изображения");
+    }
   }
   const disabled = editable ? "" : "disabled";
   const referenceImages = [
@@ -3172,7 +3193,7 @@ async function openPostEditor({ project, network, rubric, date, post }) {
         </section>
       </div>
       ${editable && post ? '<div class="flow-actions"><button type="button" class="button danger" data-delete-post>Удалить</button><span></span></div>' : ""}
-      <div data-message></div>
+      <div data-message>${resourceWarnings.length ? `<p class="error">Карточка открыта, но не удалось загрузить: ${esc(resourceWarnings.join(" и "))}. Основные данные публикации доступны.</p>` : ""}</div>
     </form>
     <section class="comments">
       <h3>Комментарии</h3>
@@ -3261,14 +3282,23 @@ async function openPostEditor({ project, network, rubric, date, post }) {
         showMessage(readError(error), "error", modal);
       }
     };
-    modal.querySelector("[data-delete-post]")?.addEventListener("click", async () => {
-      if (!confirm("Удалить эту публикацию?")) return;
-      const batch = writeBatch(db);
-      postImages.forEach((image) => batch.delete(doc(db, "projects", project.id, "postImages", image.id)));
-      batch.delete(doc(db, "projects", project.id, "posts", post.id));
-      await batch.commit();
-      modal.remove();
-      renderPlan(project.id, network.id);
+    modal.querySelector("[data-delete-post]")?.addEventListener("click", async (event) => {
+      if (!confirm(`Удалить публикацию «${post.title || "Без названия"}»? Это действие нельзя отменить.`)) return;
+      const deleteButton = event.currentTarget;
+      deleteButton.disabled = true;
+      deleteButton.textContent = "Удаляю…";
+      try {
+        const batch = writeBatch(db);
+        postImages.forEach((image) => batch.delete(doc(db, "projects", project.id, "postImages", image.id)));
+        batch.delete(doc(db, "projects", project.id, "posts", post.id));
+        await batch.commit();
+        modal.remove();
+        await renderPlan(project.id, network.id);
+      } catch (error) {
+        deleteButton.disabled = false;
+        deleteButton.textContent = "Удалить";
+        showMessage(`Не удалось удалить публикацию: ${readError(error)}`, "error", modal);
+      }
     });
   }
   modal.querySelector("#comment-form")?.addEventListener("submit", async (event) => {
