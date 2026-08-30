@@ -533,9 +533,13 @@ textarea { min-height: 105px; resize: vertical; }
 .content-grid th, .content-grid td { height: var(--cell-height, 50px); border: 1px solid rgba(var(--text-rgb), .18); padding: 5px; vertical-align: top; }
 .content-grid th { height: var(--header-height, 44px); background: rgba(var(--secondary-rgb), .18); font-weight: 400; }
 .date-column { width: 90px; background: var(--background); text-align: center; vertical-align: middle !important; }
-.post-cell { position: relative; overflow: hidden; background: var(--surface); }
-.post-cell.real { cursor: pointer; }
-.post-cell.real:hover { filter: brightness(.94); }
+.post-cell { position: relative; background: var(--surface); }
+.post-stack { display: grid; gap: 5px; }
+.post-card, .post-add { width: 100%; border: 0; border-radius: 8px; padding: 7px 20px 7px 8px; color: var(--text); font: inherit; text-align: left; }
+.post-card { position: relative; min-height: 34px; cursor: pointer; }
+.post-card:hover, .post-card:focus-visible { filter: brightness(.92); }
+.post-add { padding-right: 8px; background: transparent; color: rgba(var(--text-rgb), .64); cursor: pointer; font-size: .82em; text-align: center; }
+.post-add:hover, .post-add:focus-visible { background: rgba(var(--secondary-rgb), .13); color: var(--text); }
 .post-title { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.2; }
 .post-status-dot { position: absolute; right: 6px; bottom: 6px; width: 9px; height: 9px; border: 1px solid rgba(var(--text-rgb), .2); border-radius: 50%; }
 .post-status-idea { background: rgba(var(--secondary-rgb), .18); }

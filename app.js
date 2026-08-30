@@ -3034,13 +3034,18 @@ function drawPlan(project, network, rubrics, posts) {
   const columns = rubrics;
   const monthLabel = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(new Date(`${dates[0]}T12:00:00`));
   const gridMinWidth = Math.max(280, 100 + columns.length * 180);
-  const postMap = new Map(posts.map((post) => [`${post.date}|${post.rubricId}`, post]));
+  const postMap = new Map();
+  posts.forEach((post) => {
+    const slot = `${post.date}|${post.rubricId}`;
+    if (!postMap.has(slot)) postMap.set(slot, []);
+    postMap.get(slot).push(post);
+  });
 
   app.innerHTML = `
     <section class="plan-screen">
       <div class="page-topbar compact"><button class="back-button" data-close-tab>← Закрыть вкладку</button>${accountMarkup()}</div>
       <div class="plan-header">
-        <div><h1>${esc(project.name)} — ${esc(network.name)}</h1><p class="subtitle">Нажмите на ячейку, чтобы создать или открыть публикацию.</p></div>
+        <div><h1>${esc(project.name)} — ${esc(network.name)}</h1><p class="subtitle">В один день и рубрику можно добавить несколько публикаций.</p></div>
         <div class="plan-tools">
           ${canEdit(project.role) ? '<button class="button" data-edit-rubrics>Редактировать рубрики</button>' : ""}
           <button class="button ghost small" data-prev-dates>← Месяц</button>
@@ -3059,10 +3064,14 @@ function drawPlan(project, network, rubrics, posts) {
             ${dates.map((date) => `<tr>
               <td class="date-column">${formatDate(date)}</td>
               ${columns.map((rubric) => {
-                const post = postMap.get(`${date}|${rubric.id}`);
-                const clickable = post || canEdit(project.role);
-                return `<td class="post-cell real ${post ? `post-status-${statusClass(post.status)}` : ""}" ${clickable ? `data-post-cell data-date="${date}" data-rubric="${rubric.id}" data-post="${post?.id || ""}"` : ""}>
-                  ${post ? `<span class="post-title">${esc(post.title)}</span><i class="post-status-dot" title="${esc(post.status || "Идея")}"></i>` : ""}
+                const cellPosts = postMap.get(`${date}|${rubric.id}`) || [];
+                return `<td class="post-cell">
+                  <div class="post-stack">
+                    ${cellPosts.map((post) => `<button type="button" class="post-card post-status-${statusClass(post.status)}" data-open-post data-date="${esc(date)}" data-rubric="${esc(rubric.id)}" data-post="${esc(post.id)}" aria-label="Открыть публикацию: ${esc(post.title || "Без названия")}">
+                      <span class="post-title">${esc(post.title || "Без названия")}</span><i class="post-status-dot" title="${esc(post.status || "Идея")}"></i>
+                    </button>`).join("")}
+                    ${canEdit(project.role) ? `<button type="button" class="post-add" data-new-post data-date="${esc(date)}" data-rubric="${esc(rubric.id)}">+ Добавить пост</button>` : ""}
+                  </div>
                 </td>`;
               }).join("")}
             </tr>`).join("")}
@@ -3080,21 +3089,23 @@ function drawPlan(project, network, rubrics, posts) {
   document.querySelector("[data-next-dates]").onclick = () => { planOffset += 1; renderPlan(project.id, network.id); };
   document.querySelector("[data-zoom-out]").onclick = () => { planZoom = Math.max(0.8, planZoom - 0.1); drawPlan(project, network, rubrics, posts); };
   document.querySelector("[data-zoom-in]").onclick = () => { planZoom = Math.min(1.4, planZoom + 0.1); drawPlan(project, network, rubrics, posts); };
-  document.querySelectorAll("[data-post-cell]").forEach((cell) => {
-    cell.onclick = async () => {
-      if (cell.dataset.opening === "true") return;
-      cell.dataset.opening = "true";
-      cell.setAttribute("aria-busy", "true");
+  document.querySelectorAll("[data-open-post], [data-new-post]").forEach((button) => {
+    button.onclick = async () => {
+      if (button.dataset.opening === "true") return;
+      button.dataset.opening = "true";
+      button.setAttribute("aria-busy", "true");
       try {
-        const post = posts.find((item) => item.id === cell.dataset.post) || null;
-        const rubric = rubrics.find((item) => item.id === cell.dataset.rubric);
+        const post = button.matches("[data-open-post]")
+          ? posts.find((item) => item.id === button.dataset.post) || null
+          : null;
+        const rubric = rubrics.find((item) => item.id === button.dataset.rubric);
         if (!rubric) throw new Error("Рубрика этой публикации больше не найдена.");
-        await openPostEditor({ project, network, rubric, date: cell.dataset.date, post });
+        await openPostEditor({ project, network, rubric, date: button.dataset.date, post });
       } catch (error) {
         showMessage(`Не удалось открыть публикацию: ${readError(error)}`);
       } finally {
-        delete cell.dataset.opening;
-        cell.removeAttribute("aria-busy");
+        delete button.dataset.opening;
+        button.removeAttribute("aria-busy");
       }
     };
   });
