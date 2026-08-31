@@ -3111,6 +3111,12 @@ function drawPlan(project, network, rubrics, posts) {
   });
 }
 
+function monthOffsetForDate(baseIso, targetIso) {
+  const base = new Date(`${baseIso}T12:00:00`);
+  const target = new Date(`${targetIso}T12:00:00`);
+  return (target.getFullYear() - base.getFullYear()) * 12 + target.getMonth() - base.getMonth();
+}
+
 function openImageViewer(url, label) {
   openModal(
     label,
@@ -3122,6 +3128,7 @@ function openImageViewer(url, label) {
 async function openPostEditor({ project, network, rubric, date, post }) {
   const editable = canEdit(project.role);
   const commentable = canComment(project.role);
+  const editorDate = post?.date || date;
   const members = editable ? await getProjectMembers(project.id) : [];
   let comments = [];
   let postImages = [];
@@ -3183,7 +3190,7 @@ async function openPostEditor({ project, network, rubric, date, post }) {
     `<form class="form" id="post-form">
       ${editable ? '<div class="post-form-toolbar"><span>Сохраните изменения перед закрытием</span><button class="button primary">Сохранить</button></div>' : ""}
       <div class="form-row post-meta-row">
-        <label>Дата<input value="${formatDate(date)}" disabled></label>
+        <label>Дата<input type="date" name="date" value="${esc(editorDate)}" required ${disabled}></label>
         <label>Рубрика<input value="${esc(rubric.name)}" disabled></label>
         <label>Ответственный<select name="assigneeId" ${disabled}>${assigneeOptions(members, selectedAssigneeId, selectedAssigneeName)}</select></label>
       </div>
@@ -3242,13 +3249,14 @@ async function openPostEditor({ project, network, rubric, date, post }) {
       const referenceFiles = data.getAll("referenceFiles").filter((file) => file instanceof File && file.size);
       const visualFiles = data.getAll("visualFiles").filter((file) => file instanceof File && file.size);
       const assigneeId = data.get("assigneeId");
+      const selectedDate = data.get("date");
       const selectedMember = members.find((member) => member.userId === assigneeId);
       const payload = {
         networkId: network.id,
         networkName: network.name,
         rubricId: rubric.id,
         rubricName: rubric.name,
-        date,
+        date: selectedDate,
         title: data.get("title").trim(),
         idea: data.get("idea").trim(),
         benefit: data.get("benefit").trim(),
@@ -3285,6 +3293,7 @@ async function openPostEditor({ project, network, rubric, date, post }) {
           }
         }
         await batch.commit();
+        planOffset = monthOffsetForDate(project.planStartDate || todayIso(), selectedDate);
         modal.remove();
         renderPlan(project.id, network.id);
       } catch (error) {
