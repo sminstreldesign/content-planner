@@ -83,6 +83,11 @@ const canEdit = (role) => ["owner", "editor"].includes(role);
 const canComment = (role) => ["owner", "editor"].includes(role);
 const statusClass = (status) => STATUS_CLASSES[status] || STATUS_CLASSES.Идея;
 const todayIso = () => new Date().toISOString().slice(0, 10);
+// Keep the calendar anchored to the local month when this tab was opened.
+const planBaseDate = (() => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+})();
 
 function addDays(iso, amount) {
   const date = new Date(`${iso}T12:00:00`);
@@ -3029,8 +3034,7 @@ async function renderPlan(projectId, networkId) {
 }
 
 function drawPlan(project, network, rubrics, posts) {
-  const baseStart = project.planStartDate || todayIso();
-  const dates = monthDates(baseStart, planOffset);
+  const dates = monthDates(planBaseDate, planOffset);
   const columns = rubrics;
   const monthLabel = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(new Date(`${dates[0]}T12:00:00`));
   const gridMinWidth = Math.max(280, 100 + columns.length * 180);
@@ -3293,7 +3297,7 @@ async function openPostEditor({ project, network, rubric, date, post }) {
           }
         }
         await batch.commit();
-        planOffset = monthOffsetForDate(project.planStartDate || todayIso(), selectedDate);
+        planOffset = monthOffsetForDate(planBaseDate, selectedDate);
         modal.remove();
         renderPlan(project.id, network.id);
       } catch (error) {
