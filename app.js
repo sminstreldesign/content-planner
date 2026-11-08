@@ -1138,7 +1138,25 @@ function renderProjectWorkspace(project) {
 /* ---------------- Референсы ---------------- */
 
 const REFERENCE_IMAGE_LIMIT = 4;
-const REFERENCE_COLUMN_COLORS = ["pink", "orange", "green", "violet", "blue", "peach"];
+const REFERENCE_NOTES_PREFIX = "[[reference-feedback-v2]]";
+
+function decodeReferenceNotes(value) {
+  const raw = typeof value === "string" ? value : "";
+  if (raw.startsWith(REFERENCE_NOTES_PREFIX)) {
+    try {
+      const notes = JSON.parse(raw.slice(REFERENCE_NOTES_PREFIX.length));
+      if (Array.isArray(notes) && notes.length === 2 && notes.every((note) => typeof note === "string")) {
+        return { liked: notes[0], disliked: notes[1] };
+      }
+    } catch { /* Treat malformed legacy text as an ordinary note. */ }
+  }
+  return { liked: raw, disliked: "" };
+}
+
+function encodeReferenceNotes(liked, disliked) {
+  if (!disliked) return liked;
+  return `${REFERENCE_NOTES_PREFIX}${JSON.stringify([liked, disliked])}`;
+}
 
 function normalizeReferenceMedia(media) {
   if (!Array.isArray(media)) return [];
@@ -1173,18 +1191,18 @@ function openReferenceMediaViewer(item) {
 
 async function getReferenceEntries(projectId) {
   const snapshot = await getDocs(collection(db, "projects", projectId, "references"));
-  return snapshot.docs.map((item) => ({
-    id: item.id,
-    ...item.data(),
-    media: normalizeReferenceMedia(item.data().media),
-  })).sort((a, b) => {
+  return snapshot.docs.map((item) => {
+    const data = item.data();
+    const notes = decodeReferenceNotes(data.note);
+    return { id: item.id, ...data, note: notes.liked, dislikeNote: notes.disliked, media: normalizeReferenceMedia(data.media) };
+  }).sort((a, b) => {
     const aTime = a.createdAt?.toMillis?.() || 0;
     const bTime = b.createdAt?.toMillis?.() || 0;
     return aTime - bTime || a.id.localeCompare(b.id);
   });
 }
 
-async function renderReferencesBoard(project) {
+async function renderReferencesBoard(project, expandedNetworkId = null) {
   loader("Загружаю референсы…");
   try {
     const [networks, references] = await Promise.all([getNetworks(project.id), getReferenceEntries(project.id)]);
@@ -1205,18 +1223,17 @@ async function renderReferencesBoard(project) {
           <div class="references-board" style="--reference-columns:${networks.length}">
             ${networks.map((network, columnIndex) => {
               const columnReferences = references.filter((item) => item.networkId === network.id);
-              const color = REFERENCE_COLUMN_COLORS[columnIndex % REFERENCE_COLUMN_COLORS.length];
-              return `<section class="reference-column reference-column-${color}">
-                <header class="reference-column-heading">
-                  <div><span>${String(columnIndex + 1).padStart(2, "0")}</span><h2>${esc(network.name)}</h2></div>
+              return `<section class="reference-column">
+                <button type="button" class="reference-column-heading" data-open-reference-column="${esc(network.id)}" aria-label="Раскрыть ${esc(network.name)}">
+                  <div><span>${String(columnIndex + 1).padStart(2, "0")}</span><span class="reference-column-name">${esc(network.name)}</span></div>
                   <small>${columnReferences.length}</small>
-                </header>
+                </button>
                 <div class="reference-column-cards">
                   ${columnReferences.map((entry, entryIndex) => `
                     <button type="button" class="reference-card" data-open-reference="${entry.id}">
                       <span class="reference-card-number">Референс ${entryIndex + 1}</span>
                       <span class="reference-card-gallery reference-card-gallery-${Math.min(entry.media.length, 4)}">${referenceMediaMarkup(entry.media, true)}</span>
-                      <span class="reference-card-note">${esc(entry.note || "Добавьте описание: что понравилось")}</span>
+                      <span class="reference-card-feedback"><span><b>Понравилось</b>${esc(entry.note || "Пока нет заметки")}</span><span><b>Не понравилось</b>${esc(entry.dislikeNote || "Пока нет заметки")}</span></span>
                       <span class="reference-card-open">Открыть →</span>
                     </button>`).join("")}
                   ${editable ? `<button type="button" class="reference-add-card" data-add-reference="${network.id}"><span>＋</span>Добавить референс</button>` : ""}
@@ -1233,6 +1250,14 @@ async function renderReferencesBoard(project) {
       </section>`;
     bindTopbar(() => renderProjectWorkspace(project));
     document.querySelector("[data-reference-network-settings]")?.addEventListener("click", () => renderNetworkSettings(project));
+    document.querySelectorAll("[data-open-reference-column]").forEach((button) => {
+      button.onclick = () => openReferenceColumn({
+        project,
+        network: networks.find((item) => item.id === button.dataset.openReferenceColumn),
+        references,
+        editable,
+      });
+    });
     document.querySelectorAll("[data-add-reference]").forEach((button) => {
       button.onclick = () => openReferenceEditor({
         project,
@@ -1243,13 +1268,61 @@ async function renderReferencesBoard(project) {
     document.querySelectorAll("[data-open-reference]").forEach((button) => {
       button.onclick = () => {
         const entry = references.find((item) => item.id === button.dataset.openReference);
-        openReferenceEditor({ project, network: networks.find((item) => item.id === entry.networkId), entry });
+        openReferenceColumn({ project, network: networks.find((item) => item.id === entry.networkId), references, editable, focusReferenceId: entry.id });
       };
     });
+    if (expandedNetworkId) {
+      const network = networks.find((item) => item.id === expandedNetworkId);
+      if (network) openReferenceColumn({ project, network, references, editable });
+    }
   } catch (error) {
     app.innerHTML = `<div class="loader"><div><h2>Не удалось открыть референсы</h2><p class="error">${esc(readError(error))}</p><button class="button" data-reference-back>Назад</button></div></div>`;
     document.querySelector("[data-reference-back]").onclick = () => renderProjectWorkspace(project);
   }
+}
+
+function openReferenceColumn({ project, network, references, editable, focusReferenceId = null }) {
+  const entries = references.filter((item) => item.networkId === network.id);
+  const modal = openModal(
+    network.name,
+    `<div class="reference-column-expanded-meta">${entries.length} ${entries.length === 1 ? "референс" : "референсов"} · Листайте внутри соцсети</div>
+     <div class="reference-column-expanded-list">
+       ${entries.length ? entries.map((entry, index) => `
+         <article class="reference-expanded-card" data-expanded-reference="${esc(entry.id)}">
+           <div class="reference-expanded-card-heading"><strong>Референс ${index + 1}</strong>${editable ? `<button type="button" class="button" data-edit-column-reference="${esc(entry.id)}">Изменить</button>` : ""}</div>
+           <div class="reference-expanded-layout">
+             <div class="reference-expanded-media">
+               ${entry.media.length ? entry.media.map((item, mediaIndex) => `<button type="button" class="reference-expanded-image" data-column-media="${esc(entry.id)}" data-media-index="${mediaIndex}" aria-label="Открыть ${esc(item.name || `Изображение ${mediaIndex + 1}`)}"><img src="${esc(item.dataUrl)}" alt="${esc(item.name || `Изображение ${mediaIndex + 1}`)}"></button>`).join("") : '<span class="reference-expanded-no-media">Без изображений</span>'}
+             </div>
+             <div class="reference-expanded-notes">
+               <section><h3>Что понравилось</h3><p>${esc(entry.note || "Пока нет заметки")}</p></section>
+               <section><h3>Что не понравилось</h3><p>${esc(entry.dislikeNote || "Пока нет заметки")}</p></section>
+             </div>
+           </div>
+         </article>`).join("") : '<p class="reference-column-expanded-empty">Пока нет референсов. Добавьте первый пример для этой соцсети.</p>'}
+     </div>
+     ${editable ? '<button type="button" class="reference-add-card reference-column-expanded-add" data-add-column-reference><span>＋</span>Добавить референс</button>' : ""}`,
+    "reference-column-modal",
+  );
+  modal.classList.add("reference-column-backdrop");
+  modal.querySelector("[data-add-column-reference]")?.addEventListener("click", () => openReferenceEditor({ project, network, entry: null }));
+  modal.querySelectorAll("[data-edit-column-reference]").forEach((button) => {
+    button.onclick = () => openReferenceEditor({ project, network, entry: entries.find((item) => item.id === button.dataset.editColumnReference) });
+  });
+  modal.querySelectorAll("[data-column-media]").forEach((button) => {
+    button.onclick = () => {
+      const entry = entries.find((item) => item.id === button.dataset.columnMedia);
+      openReferenceMediaViewer(entry.media[Number(button.dataset.mediaIndex)]);
+    };
+  });
+  modal.querySelectorAll(".reference-expanded-card").forEach((card) => {
+    const image = card.querySelector(".reference-expanded-image img");
+    if (!image) return;
+    const setOrientation = () => card.classList.toggle("is-landscape", image.naturalWidth >= image.naturalHeight);
+    if (image.complete) setOrientation();
+    else image.addEventListener("load", setOrientation, { once: true });
+  });
+  if (focusReferenceId) modal.querySelector(`[data-expanded-reference="${CSS.escape(focusReferenceId)}"]`)?.scrollIntoView({ block: "center" });
 }
 
 function validateReferenceFile(file) {
@@ -1270,6 +1343,9 @@ async function openReferenceEditor({ project, network, entry }) {
       <div class="reference-editor-meta"><span>Соцсеть</span><strong>${esc(network.name)}</strong></div>
       <label>Что понравилось
         <textarea name="note" maxlength="4000" placeholder="Опишите идею, приём, подачу, визуальный стиль или деталь, которую хотите сохранить" ${disabled}>${esc(entry?.note || "")}</textarea>
+      </label>
+      <label>Что не понравилось
+        <textarea name="dislikeNote" maxlength="4000" placeholder="Что не подходит, что хотелось бы изменить или не повторять" ${disabled}>${esc(entry?.dislikeNote || "")}</textarea>
       </label>
       <div class="reference-editor-files">
         <div class="reference-editor-files-heading">
@@ -1325,6 +1401,9 @@ async function openReferenceEditor({ project, network, entry }) {
     try {
       files.forEach(validateReferenceFile);
       if (keptMedia.length + files.length > REFERENCE_IMAGE_LIMIT) throw new Error("В одном референсе можно сохранить не более четырёх изображений.");
+      if (encodeReferenceNotes(String(data.get("note") || "").trim(), String(data.get("dislikeNote") || "").trim()).length > 4000) {
+        throw new Error("Оба текста вместе не должны превышать 4000 символов. Сократите одну из заметок.");
+      }
     } catch (error) {
       showMessage(error.message, "error", form);
       return;
@@ -1343,7 +1422,7 @@ async function openReferenceEditor({ project, network, entry }) {
       const payload = {
         networkId: network.id,
         networkName: network.name,
-        note: data.get("note").trim(),
+        note: encodeReferenceNotes(String(data.get("note") || "").trim(), String(data.get("dislikeNote") || "").trim()),
         media: [...keptMedia, ...preparedImages],
         updatedBy: user.uid,
         updatedAt: serverTimestamp(),
@@ -1352,7 +1431,7 @@ async function openReferenceEditor({ project, network, entry }) {
       else await setDoc(entryRef, { ...payload, authorId: user.uid, createdAt: serverTimestamp() });
       progress.advance("Референс сохранён");
       modal.remove();
-      await renderReferencesBoard(project);
+      await renderReferencesBoard(project, network.id);
     } catch (error) {
       showMessage(readError(error), "error", form);
     } finally {
@@ -1365,7 +1444,7 @@ async function openReferenceEditor({ project, network, entry }) {
     try {
       await deleteDoc(entryRef);
       modal.remove();
-      await renderReferencesBoard(project);
+      await renderReferencesBoard(project, network.id);
     } catch (error) {
       event.currentTarget.disabled = false;
       showMessage(readError(error), "error", form);
